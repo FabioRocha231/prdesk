@@ -70,6 +70,15 @@ export async function notifyActivity(items: Activity[], me: string | null): Prom
   for (const a of fresh) sendNotification(describe(a));
 }
 
+/** An agent's terminal went quiet: it most likely finished or is asking something. */
+export async function notifyAgentQuiet(agentName: string, where: string): Promise<void> {
+  if (!(await canNotify())) return;
+  sendNotification({
+    title: `${agentName} parou`,
+    body: [where, "Provavelmente terminou ou está esperando você."].filter(Boolean).join("\n"),
+  });
+}
+
 /** Newest-first feed: a thread that got new activity moves to the top instead of repeating. */
 export function mergeFeed(feed: Activity[], incoming: Activity[]): Activity[] {
   const ids = new Set(incoming.map((a): string => a.id));

@@ -698,6 +698,9 @@ kbd {
 .flag-dim {
   color: var(--text-3);
 }
+.flag-agent {
+  color: var(--cyan);
+}
 /* One short dependency line under the card: "espera core#643", "trava 2 PRs". */
 .row:has(+ .row-deps) {
   border-bottom: none;

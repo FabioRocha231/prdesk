@@ -18,7 +18,7 @@ import type { ReactElement } from "react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 
-import { Board } from "./components/Board";
+import { type AgentState, Board } from "./components/Board";
 import { Chains } from "./components/Chains";
 import { DailyDialog } from "./components/Daily";
 import { Detail, type DetailState, type PrAi, type SnoozeChoice } from "./components/Detail";
@@ -42,7 +42,7 @@ import {
   loadConfig,
   saveConfig,
 } from "./lib/config";
-import { chains as chainsOf, type Deps, dependencyIndex, type PrRef, refKey } from "./lib/deps";
+import { chains as chainsOf, type Deps, dependencyIndex, type PrRef, refKey, shortRef } from "./lib/deps";
 import { clock } from "./lib/format";
 import { fetchDetail, fetchPull, fetchPulls, type PullCache, pullsFromCache } from "./lib/github";
 import {
@@ -58,7 +58,7 @@ import {
   writeAgentContext,
 } from "./lib/ipc";
 import { COLUMNS, type DraftComment, type PrFile, type PullRequest, type TriagedPull } from "./lib/model";
-import { mergeFeed, notifyActivity, notifyBranchChanges, setBadge } from "./lib/notify";
+import { mergeFeed, notifyActivity, notifyAgentQuiet, notifyBranchChanges, setBadge } from "./lib/notify";
 import { loadCached, loadValue, saveCached, saveValue } from "./lib/persist";
 import { isSnoozed, type Snoozes, wakeTime } from "./lib/snooze";
 import { board, triage } from "./lib/triage";
@@ -85,7 +85,8 @@ type Sync = { loading: boolean; at: Date | null; error: string | null };
 
 type Session =
   | { status: "preparing"; agentName: string }
-  | { status: "running"; agentName: string; sessionId: number; cwd: string }
+  /** `quiet`: no terminal output for a while, so the agent likely finished or is asking something. */
+  | { status: "running"; agentName: string; sessionId: number; cwd: string; quiet?: boolean }
   | { status: "exited"; agentName: string; cwd: string }
   | { status: "error"; agentName: string; message: string };
 
@@ -491,6 +492,38 @@ export function App(): ReactElement {
     });
   }, []);
 
+  // Refs, so the quiet callback stays stable (a new one would rebuild every terminal) yet reads current state.
+  const sessionsRef = useRef(sessions);
+  sessionsRef.current = sessions;
+  const selectedRef = useRef(selectedId);
+  selectedRef.current = selectedId;
+  const describeRef = useRef((_key: string): string => "");
+  describeRef.current = (key: string): string => {
+    const pr = pulls?.find((p): boolean => p.id === key) ?? extra[key];
+    if (pr !== undefined) return `${shortRef(pr)} · ${pr.title}`;
+    const task = tasks[key];
+    return task === undefined ? "" : `${task.repo} · ${task.text}`;
+  };
+
+  const onSessionQuiet = useCallback((sessionId: number, quiet: boolean): void => {
+    const entry = Object.entries(sessionsRef.current).find(
+      ([, s]): boolean => s.status === "running" && s.sessionId === sessionId,
+    );
+    if (entry === undefined) return;
+    const [key, s] = entry;
+    if (s.status !== "running" || (s.quiet ?? false) === quiet) return;
+    setSessions((all) => {
+      const current = all[key];
+      return current?.status === "running" && current.sessionId === sessionId
+        ? { ...all, [key]: { ...current, quiet } }
+        : all;
+    });
+    // Only worth a notification when I am not already looking at that terminal.
+    if (quiet && (!document.hasFocus() || selectedRef.current !== key)) {
+      void notifyAgentQuiet(s.agentName, describeRef.current(key));
+    }
+  }, []);
+
   const closeSession = async (prId: string): Promise<void> => {
     const s = sessions[prId];
     if (s?.status === "running") await ptyKill(s.sessionId);
@@ -663,6 +696,15 @@ export function App(): ReactElement {
     }
   };
   const dockOpen = inDetail && session !== undefined;
+  const agentStates = new Map(
+    Object.entries(sessions).flatMap(([key, s]): [string, AgentState][] =>
+      s.status === "preparing"
+        ? [[key, "working"]]
+        : s.status === "running"
+          ? [[key, s.quiet ? "waiting" : "working"]]
+          : [],
+    ),
+  );
   const mainClass = ["main", inDetail ? "is-detail" : "", dockOpen ? "has-dock" : ""].filter(Boolean).join(" ");
 
   return (
@@ -869,6 +911,7 @@ export function App(): ReactElement {
             deps={deps}
             loading={pulls === null}
             selectedId={cursor}
+            agents={agentStates}
             rail={false}
             onSelect={navigate}
           />
@@ -982,6 +1025,7 @@ export function App(): ReactElement {
                 sessionId={s.sessionId}
                 visible={dockOpen && prId === selectedId}
                 onExit={onSessionExit}
+                onQuiet={onSessionQuiet}
               />
             ) : null,
           )}

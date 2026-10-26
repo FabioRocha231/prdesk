@@ -39,9 +39,17 @@ export function transitionName(prefix: string, id: string): string {
   return `${prefix}-${id.replace(/[^A-Za-z0-9_-]/g, "")}`;
 }
 
-function Flags({ item }: { item: TriagedPull }): ReactElement | null {
+/** What the agent opened on a PR is doing: printing output, or quiet (done or asking). */
+export type AgentState = "working" | "waiting";
+
+const AGENT_FLAG: Record<AgentState, { text: string; tone: string }> = {
+  working: { text: "Agente trabalhando", tone: "agent" },
+  waiting: { text: "Agente aguardando você", tone: "warn" },
+};
+
+function Flags({ item, agent }: { item: TriagedPull; agent: AgentState | undefined }): ReactElement | null {
   const { pr } = item;
-  const flags: { text: string; tone: string }[] = [];
+  const flags: { text: string; tone: string }[] = agent === undefined ? [] : [AGENT_FLAG[agent]];
   if (pr.branch === "conflicts") flags.push({ text: "Conflitos", tone: "warn" });
   if (pr.branch === "behind") flags.push({ text: "Desatualizada", tone: "dim" });
   if (pr.ciState === "FAILURE" || pr.ciState === "ERROR") flags.push({ text: "CI falhou", tone: "bad" });
@@ -190,10 +198,12 @@ function Row({
   onLinkHover,
   rail,
   selected,
+  agent,
   onSelect,
 }: {
   item: TriagedPull;
   deps: Deps | undefined;
+  agent: AgentState | undefined;
   /** Lit while a linked PR is hovered: its role in that dependency. */
   linked: Role | undefined;
   /** Another org has a repo with this name, so the owner tells them apart. */
@@ -233,7 +243,7 @@ function Row({
               {triage.actor !== null && <b>{triage.actor} </b>}
               {triage.reason}
             </span>
-            <Flags item={item} />
+            <Flags item={item} agent={agent} />
           </span>
         )}
       </button>
@@ -365,6 +375,7 @@ function LaneStrip({
   );
 }
 
+const NO_AGENTS: ReadonlyMap<string, AgentState> = new Map();
 const KEY_STEP_PX = 40;
 const LAYOUT_KEY = "laneLayout";
 
@@ -427,6 +438,7 @@ export function Board({
   loading,
   selectedId,
   rail,
+  agents = NO_AGENTS,
   onSelect,
 }: {
   groups: Record<Column, TriagedPull[]>;
@@ -434,6 +446,8 @@ export function Board({
   loading: boolean;
   selectedId: string | null;
   rail: boolean;
+  /** Agent state per PR id, for the cards that have one open. */
+  agents?: ReadonlyMap<string, AgentState>;
   onSelect: (id: string) => void;
 }): ReactElement {
   // Rows lit by hovering a dependency elsewhere on the board.
@@ -510,6 +524,7 @@ export function Board({
                 onLinkHover={(links): void => setLit(new Map(links.map((l): [string, Role] => [l.pr.id, l.role])))}
                 rail={rail}
                 selected={item.pr.id === selectedId}
+                agent={agents.get(item.pr.id)}
                 onSelect={onSelect}
               />
             ),

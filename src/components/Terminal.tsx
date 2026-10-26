@@ -6,6 +6,10 @@ import { useEffect, useRef } from "react";
 
 import { ptyAttach, ptyResize, ptyWrite } from "../lib/ipc";
 
+// ponytail: "quiet" is no output for this long. Agents redraw a spinner while they work, so silence means done or
+// asking; a long silent build reads as quiet too. Upgrade path: an agent hook that reports its state.
+const QUIET_MS = 15 * 1000;
+
 function cssVar(name: string): string {
   return getComputedStyle(document.documentElement).getPropertyValue(name).trim();
 }
@@ -28,12 +32,18 @@ export function Terminal({
   sessionId,
   visible,
   onExit,
+  onQuiet,
 }: {
   sessionId: number;
   visible: boolean;
   onExit: (sessionId: number) => void;
+  /** The output stopped (true) or started again (false). */
+  onQuiet: (sessionId: number, quiet: boolean) => void;
 }): ReactElement {
   const host = useRef<HTMLDivElement>(null);
+  // A ref, so a new callback identity does not tear down the terminal.
+  const onQuietRef = useRef(onQuiet);
+  onQuietRef.current = onQuiet;
   const fit = useRef<FitAddon | null>(null);
   const term = useRef<XTerm | null>(null);
 
@@ -47,10 +57,25 @@ export function Terminal({
     term.current = xterm;
     fit.current = fitAddon;
 
+    let quietTimer: number | undefined;
+    let quiet = false;
+    const heard = (): void => {
+      window.clearTimeout(quietTimer);
+      if (quiet) {
+        quiet = false;
+        onQuietRef.current(sessionId, false);
+      }
+      quietTimer = window.setTimeout((): void => {
+        quiet = true;
+        onQuietRef.current(sessionId, true);
+      }, QUIET_MS);
+    };
+
     // Live chunks can race the backlog reply, so they queue until the backlog is written.
     let attached = false;
     const queued: Uint8Array[] = [];
     const unlistenOutput = listen<string>(`pty-output-${sessionId}`, (e): void => {
+      heard();
       const chunk = decode(e.payload);
       if (attached) xterm.write(chunk);
       else queued.push(chunk);
@@ -61,6 +86,7 @@ export function Terminal({
       xterm.write(decode(await ptyAttach(sessionId)));
       for (const chunk of queued) xterm.write(chunk);
       attached = true;
+      heard();
     })();
 
     const input = xterm.onData((data): void => {
@@ -81,6 +107,7 @@ export function Terminal({
     scheme.addEventListener("change", retheme);
 
     return (): void => {
+      window.clearTimeout(quietTimer);
       scheme.removeEventListener("change", retheme);
       resize.disconnect();
       input.dispose();
