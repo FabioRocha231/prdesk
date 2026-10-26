@@ -28,6 +28,9 @@ function result(column: Column, reason: string, actor: string | null, at: string
 }
 
 function triageMine(pr: PullRequest, me: string, waitingOn: string[]): Triage {
+  // Conflicts block everything else, so they lead, matching the PR's next step (nextStep.ts).
+  if (pr.branch === "conflicts") return result("myTurn", "tem conflitos para resolver", null, pr.updatedAt);
+
   // Bot threads (CodeRabbit & co.) are noise: they never make it my turn.
   const open = pr.threads.filter(
     (t): boolean => !t.isResolved && !t.lastIsBot && t.lastAuthor !== null && t.lastAuthor !== me,
@@ -46,8 +49,6 @@ function triageMine(pr: PullRequest, me: string, waitingOn: string[]): Triage {
   if (pr.ciState !== null && FAILING_CI.has(pr.ciState)) {
     return result("myTurn", "CI falhando", null, pr.lastCommitAt);
   }
-
-  if (pr.branch === "conflicts") return result("myTurn", "tem conflitos para resolver", null, pr.updatedAt);
 
   const comment = pr.lastComment;
   if (comment !== null && comment.author !== me && isAfter(comment.at, pr.lastCommitAt)) {

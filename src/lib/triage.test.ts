@@ -41,8 +41,8 @@ describe("triage of my PRs", () => {
     });
   });
 
-  it("is my turn when the branch has conflicts", () => {
-    expect(triage(pr({ branch: "conflicts" }), ME)).toMatchObject({
+  it("is my turn when the branch has conflicts, ahead of failing CI", () => {
+    expect(triage(pr({ branch: "conflicts", ciState: "FAILURE" }), ME)).toMatchObject({
       column: "myTurn",
       reason: "tem conflitos para resolver",
     });
