@@ -2305,7 +2305,7 @@ textarea.input {
 
 .palette-item {
   display: grid;
-  grid-template-columns: 10px auto minmax(0, 1fr) auto auto;
+  grid-template-columns: auto minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 12px;
   width: 100%;
