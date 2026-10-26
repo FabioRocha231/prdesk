@@ -1858,15 +1858,27 @@ textarea.input {
   resize: vertical;
 }
 
+/* One block per agent: name and remove on top, each command on its own labelled line at full width. */
 .agent-row {
   display: grid;
-  grid-template-columns: 130px minmax(0, 1fr) minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
   align-items: center;
+  padding-bottom: 14px;
+  border-bottom: 1px solid var(--line);
 }
 
-.agent-row .input:nth-child(2),
-.agent-row .input:nth-child(3) {
+.agent-cmd {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: 170px minmax(0, 1fr);
+  gap: 8px;
+  align-items: center;
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+
+.agent-cmd .input {
   font-family: var(--mono);
   font-size: 0.75rem;
 }

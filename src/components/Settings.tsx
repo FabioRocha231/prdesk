@@ -189,22 +189,9 @@ export function Settings({
                   <input
                     className="input"
                     aria-label="Nome do agente"
+                    placeholder="Nome do agente"
                     value={a.name}
                     onChange={(e): void => updateAgent(a.id, { name: e.target.value })}
-                  />
-                  <input
-                    className="input"
-                    aria-label={`Comando do ${a.name}`}
-                    value={a.command}
-                    onChange={(e): void => updateAgent(a.id, { command: e.target.value })}
-                  />
-                  <input
-                    className="input"
-                    aria-label={`Comando sem terminal do ${a.name}`}
-                    placeholder="sem terminal: claude -p {prompt}"
-                    title="Usado pela IA do app (análise de PR, rascunho de respostas). Deve imprimir a resposta e sair."
-                    value={a.headless}
-                    onChange={(e): void => updateAgent(a.id, { headless: e.target.value })}
                   />
                   <button
                     type="button"
@@ -216,6 +203,23 @@ export function Settings({
                   >
                     Remover
                   </button>
+                  <label className="agent-cmd">
+                    <span>No terminal</span>
+                    <input
+                      className="input"
+                      value={a.command}
+                      onChange={(e): void => updateAgent(a.id, { command: e.target.value })}
+                    />
+                  </label>
+                  <label className="agent-cmd">
+                    <span>Sem terminal (IA do app)</span>
+                    <input
+                      className="input"
+                      placeholder="claude -p {prompt}"
+                      value={a.headless}
+                      onChange={(e): void => updateAgent(a.id, { headless: e.target.value })}
+                    />
+                  </label>
                 </div>
               ),
             )}
@@ -251,9 +255,9 @@ export function Settings({
               </label>
             </div>
             <p className="hint">
-              O comando roda no seu shell, dentro do worktree da PR. {"{prompt}"} vira as instruções para o agente. O
-              segundo campo é a versão sem terminal (imprime a resposta e sai), usada pela IA do app: análise de PR,
-              rascunho de respostas e descrição de PR.
+              Os comandos rodam no seu shell, dentro do worktree da PR, e {"{prompt}"} vira as instruções para o agente.
+              A versão sem terminal imprime a resposta e sai; a IA do app usa ela para analisar PRs e rascunhar
+              respostas e descrições.
             </p>
             {badAgents.length > 0 && (
               <p className="hint error">Todo agente precisa de nome e de {"{prompt}"} no comando.</p>
