@@ -1032,7 +1032,8 @@ button.chain-node:hover {
   margin-top: 14px;
 }
 
-.dhead-snoozed {
+.dhead-snoozed,
+.dhead-automerge {
   padding: 4px 8px;
   border: 1px solid var(--line-hi);
   font: 600 0.75rem / 1 var(--font);

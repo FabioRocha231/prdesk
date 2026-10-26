@@ -132,6 +132,8 @@ export interface PullDetail {
   timeline: (Comment & { reviewState: string | null })[];
   /** MERGEABLE, CONFLICTING or UNKNOWN. */
   mergeable: string;
+  /** GitHub will merge it by itself once reviews and required checks pass. */
+  autoMerge: boolean;
   /** The viewer's default merge method for this repo: MERGE, SQUASH or REBASE. */
   mergeMethod: string;
   /** Node ids of people who already reviewed, for re-requesting their review. */

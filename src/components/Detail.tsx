@@ -28,7 +28,9 @@ import {
   addComment,
   approve,
   convertToDraft,
+  disableAutoMerge,
   editPull,
+  enableAutoMerge,
   markReady,
   merge,
   requestReviewers,
@@ -449,6 +451,25 @@ function ActionBar({
     if (mine && (waiting.length > 0 || failing.length > 0)) add("pr", actions.autopilot, !agentBlocked);
     if (detail.mergeable === "CONFLICTING") add("pr", actions.conflicts, !agentBlocked);
     if (mergeReady) add("pr", actions.merge);
+    // Approved-but-waiting PRs merge themselves once CI passes, so nobody has to come back for them.
+    if (mine && !pr.isDraft && !mergeReady && !blocked)
+      add(
+        "pr",
+        detail.autoMerge
+          ? {
+              key: "auto-merge-off",
+              label: "Cancelar auto-merge",
+              icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
+              run: (): void => act("auto-merge-off", async (): Promise<void> => await disableAutoMerge(config, pr.id)),
+            }
+          : {
+              key: "auto-merge",
+              label: `Mergear quando o CI passar (${mergeLabel})`,
+              icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
+              run: (): void =>
+                act("auto-merge", async (): Promise<void> => await enableAutoMerge(config, pr.id, detail.mergeMethod)),
+            },
+      );
     if (detail.mergeState === "BEHIND") add("pr", actions["update-branch"]);
     if (!mine && !iApproved)
       add("pr", {
@@ -840,6 +861,7 @@ export function Detail({
             {triage.at !== null && <span className="dhead-age"> · {age(triage.at)}</span>}
           </span>
           {snoozed && <span className="dhead-snoozed">adiada</span>}
+          {detail?.autoMerge === true && <span className="dhead-automerge">auto-merge ligado</span>}
           <div className="dhead-actions">
             <ActionBar
               config={config}

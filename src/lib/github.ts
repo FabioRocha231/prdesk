@@ -39,6 +39,7 @@ const DETAIL_QUERY = `query($id: ID!) {
   node(id: $id) {
     ... on PullRequest {
       bodyHTML body mergeStateStatus additions deletions changedFiles mergeable
+      autoMergeRequest { enabledAt }
       repository { viewerDefaultMergeMethod }
       latestReviews(first: 20) { nodes { author { ... on User { id } } } }
       commits(last: 1) {
@@ -360,6 +361,7 @@ interface RawDetail {
     comments: { nodes: RawComment[] };
     reviews: { nodes: (Omit<RawComment, "createdAt"> & { state: string; submittedAt: string })[] };
     mergeable: string;
+    autoMergeRequest: { enabledAt: string } | null;
     repository: { viewerDefaultMergeMethod: string };
     latestReviews: { nodes: { author: { id?: string } | null }[] };
     commits: { nodes: { commit: { statusCheckRollup: { contexts: { nodes: RawContext[] } } | null } }[] };
@@ -444,6 +446,7 @@ export async function fetchDetail(config: Config, id: string): Promise<PullDetai
     threads,
     timeline,
     mergeable: node.mergeable,
+    autoMerge: node.autoMergeRequest !== null,
     mergeMethod: node.repository.viewerDefaultMergeMethod,
     reviewerIds: node.latestReviews.nodes.flatMap((r): string[] => (r.author?.id === undefined ? [] : [r.author.id])),
     checks: (node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).map(toCheck),
@@ -493,6 +496,25 @@ export async function merge(config: Config, prId: string, method: string): Promi
       mergePullRequest(input: { pullRequestId: $id, mergeMethod: $method }) { clientMutationId }
     }`,
     { id: prId, method },
+  );
+}
+
+/** GitHub merges on its own once reviews and required checks pass; the repo must allow auto-merge. */
+export async function enableAutoMerge(config: Config, prId: string, method: string): Promise<void> {
+  await mutate(
+    config,
+    `mutation($id: ID!, $method: PullRequestMergeMethod!) {
+      enablePullRequestAutoMerge(input: { pullRequestId: $id, mergeMethod: $method }) { clientMutationId }
+    }`,
+    { id: prId, method },
+  );
+}
+
+export async function disableAutoMerge(config: Config, prId: string): Promise<void> {
+  await mutate(
+    config,
+    "mutation($id: ID!) { disablePullRequestAutoMerge(input: { pullRequestId: $id }) { clientMutationId } }",
+    { id: prId },
   );
 }
 
