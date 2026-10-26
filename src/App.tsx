@@ -665,16 +665,23 @@ export function App(): ReactElement {
                 : "Atualizar"}
         </button>
         <div className="band-actions">
-          <button type="button" className="band-search" onClick={(): void => setPaletteOpen(true)}>
-            <SearchIcon size={15} strokeWidth={2} aria-hidden /> Buscar PR <kbd>⌘K</kbd>
+          <button
+            type="button"
+            className="band-search"
+            title="Buscar PR (⌘K)"
+            onClick={(): void => setPaletteOpen(true)}
+          >
+            <SearchIcon size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Buscar PR</span>{" "}
+            <kbd>⌘K</kbd>
           </button>
           <button
             type="button"
             className="text-button"
+            title="Novidades (N)"
             onClick={openFeed}
             aria-label={unread > 0 ? `Novidades, ${unread} não lidas` : "Novidades"}
           >
-            <Bell size={15} strokeWidth={2} aria-hidden /> Novidades
+            <Bell size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Novidades</span>
             {unread > 0 && <span className="band-count">{unread}</span>}
           </button>
           {snoozedCount > 0 && (
@@ -685,7 +692,7 @@ export function App(): ReactElement {
               title={showSnoozed ? "Esconder as PRs adiadas" : "Mostrar as PRs adiadas no quadro"}
               onClick={(): void => setShowSnoozed(!showSnoozed)}
             >
-              <Clock size={15} strokeWidth={2} aria-hidden /> Adiadas{" "}
+              <Clock size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Adiadas</span>{" "}
               <span className="band-count muted">{snoozedCount}</span>
             </button>
           )}
@@ -697,7 +704,7 @@ export function App(): ReactElement {
               title="PRs ligadas por dependência, na ordem de merge"
               onClick={(): void => setView(view === "chains" ? "board" : "chains")}
             >
-              <Link2 size={15} strokeWidth={2} aria-hidden /> Encadeadas{" "}
+              <Link2 size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Encadeadas</span>{" "}
               <span className="band-count muted">{chains.length}</span>
             </button>
           )}
@@ -708,15 +715,16 @@ export function App(): ReactElement {
             title="Árvore de branches de um repositório (T)"
             onClick={(): void => setView(view === "tree" ? "board" : "tree")}
           >
-            <GitGraph size={15} strokeWidth={2} aria-hidden /> Árvore
+            <GitGraph size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Árvore</span>
           </button>
           <button
             type="button"
             className="text-button"
             disabled={hasToken !== true}
+            title="Resumo para a daily"
             onClick={(): void => setDailyOpen(true)}
           >
-            <CalendarCheck size={15} strokeWidth={2} aria-hidden /> Daily
+            <CalendarCheck size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Daily</span>
           </button>
           <span className="band-rule" aria-hidden />
           <button
@@ -741,10 +749,12 @@ export function App(): ReactElement {
           <button
             type="button"
             className="band-primary"
+            title="Nova PR com agente (P)"
             disabled={hasToken !== true}
             onClick={(): void => setNewTaskOpen(true)}
           >
-            <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> Nova PR <kbd>P</kbd>
+            <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Nova PR</span>{" "}
+            <kbd>P</kbd>
           </button>
         </div>
       </header>

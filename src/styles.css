@@ -3705,3 +3705,23 @@ button.tree-pill:hover {
   color: var(--text-3);
   font-size: 0.75rem;
 }
+
+/* Narrow windows: the band keeps every action but drops the labels to icons (titles and screen readers keep the names). */
+@media (max-width: 1240px) {
+  .band {
+    gap: 16px;
+  }
+
+  .band-actions {
+    gap: 12px;
+  }
+
+  .band-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+  }
+}
