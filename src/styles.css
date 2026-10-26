@@ -585,19 +585,6 @@ kbd {
   font-size: 0.875rem;
 }
 
-.lane-reveal {
-  width: 100%;
-  padding: 16px 2px;
-  color: var(--text-2);
-  font-size: 0.8125rem;
-  text-align: left;
-  transition: color 160ms ease-out;
-}
-
-.lane-reveal:hover {
-  color: var(--text);
-}
-
 .row {
   position: relative;
   display: grid;

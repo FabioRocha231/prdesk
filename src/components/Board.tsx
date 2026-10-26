@@ -436,8 +436,6 @@ export function Board({
   rail: boolean;
   onSelect: (id: string) => void;
 }): ReactElement {
-  // "Outras" asks nothing of me, so it stays folded until I want it.
-  const [showOthers, setShowOthers] = useState(false);
   // Rows lit by hovering a dependency elsewhere on the board.
   const [lit, setLit] = useState<Map<string, Role>>(new Map());
   const [layout, setLayout] = useState<LaneLayout>(DEFAULT_LAYOUT);
@@ -482,7 +480,6 @@ export function Board({
         />
       );
     }
-    const folded = !rail && column === "others" && !showOthers && items.length > 0;
     return (
       <div className={`lane lane-${column}`} key={column}>
         <LaneHead
@@ -498,37 +495,26 @@ export function Board({
                 },
               })}
         />
-        {folded ? (
-          <button type="button" className="lane-reveal" onClick={(): void => setShowOthers(true)}>
-            Mostrar {items.length} {items.length === 1 ? "PR" : "PRs"} sem pendência sua
-          </button>
-        ) : (
-          <ul className="lane-rows" aria-label={COLUMN_LABEL[column]}>
-            {loading && SKELETON_KEYS.map((k): ReactElement => <li key={k} className="skeleton" aria-hidden />)}
-            {!loading && items.length === 0 && <li className="lane-empty">{EMPTY[column]}</li>}
-            {items.map(
-              (item, i): ReactElement => (
-                <Row
-                  key={item.pr.id}
-                  item={item}
-                  deps={deps.get(item.pr.id)}
-                  linked={lit.get(item.pr.id)}
-                  showOrg={ambiguous.has(item.pr.repo.split("/")[1] ?? "")}
-                  repeat={i > 0 && sameStory(items[i - 1], item)}
-                  onLinkHover={(links): void => setLit(new Map(links.map((l): [string, Role] => [l.pr.id, l.role])))}
-                  rail={rail}
-                  selected={item.pr.id === selectedId}
-                  onSelect={onSelect}
-                />
-              ),
-            )}
-          </ul>
-        )}
-        {!rail && column === "others" && showOthers && (
-          <button type="button" className="lane-reveal" onClick={(): void => setShowOthers(false)}>
-            Recolher
-          </button>
-        )}
+        <ul className="lane-rows" aria-label={COLUMN_LABEL[column]}>
+          {loading && SKELETON_KEYS.map((k): ReactElement => <li key={k} className="skeleton" aria-hidden />)}
+          {!loading && items.length === 0 && <li className="lane-empty">{EMPTY[column]}</li>}
+          {items.map(
+            (item, i): ReactElement => (
+              <Row
+                key={item.pr.id}
+                item={item}
+                deps={deps.get(item.pr.id)}
+                linked={lit.get(item.pr.id)}
+                showOrg={ambiguous.has(item.pr.repo.split("/")[1] ?? "")}
+                repeat={i > 0 && sameStory(items[i - 1], item)}
+                onLinkHover={(links): void => setLit(new Map(links.map((l): [string, Role] => [l.pr.id, l.role])))}
+                rail={rail}
+                selected={item.pr.id === selectedId}
+                onSelect={onSelect}
+              />
+            ),
+          )}
+        </ul>
       </div>
     );
   };

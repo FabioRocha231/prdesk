@@ -13,6 +13,8 @@ describe("lanes", () => {
     expect(layout.weights.myTurn).toBe(5);
     expect(layout.collapsed.others).toBe(true);
     expect(normalizeLayout("garbage")).toEqual(DEFAULT_LAYOUT);
+    expect(DEFAULT_LAYOUT.collapsed.others).toBe(true);
+    expect(normalizeLayout({ collapsed: { others: false } }).collapsed.others).toBe(false);
   });
 
   it("builds tracks with gutters and fixed strips for folded lanes", () => {

@@ -17,7 +17,8 @@ const MAX_WEIGHT = 5;
 export const DEFAULT_LAYOUT: LaneLayout = {
   order: [...COLUMNS],
   weights: { myTurn: 1, reviewRequested: 1, waiting: 1, others: 1 },
-  collapsed: { myTurn: false, reviewRequested: false, waiting: false, others: false },
+  // "Outras" asks nothing of me, so it starts folded to a strip.
+  collapsed: { myTurn: false, reviewRequested: false, waiting: false, others: true },
 };
 
 const isColumn = (c: unknown): c is Column => typeof c === "string" && (COLUMNS as readonly string[]).includes(c);
@@ -32,7 +33,8 @@ export function normalizeLayout(raw: unknown): LaneLayout {
   for (const c of COLUMNS) {
     const w = (r.weights as Record<string, unknown> | undefined)?.[c];
     if (typeof w === "number" && Number.isFinite(w)) weights[c] = Math.min(MAX_WEIGHT, Math.max(MIN_WEIGHT, w));
-    collapsed[c] = (r.collapsed as Record<string, unknown> | undefined)?.[c] === true;
+    const folded = (r.collapsed as Record<string, unknown> | undefined)?.[c];
+    if (typeof folded === "boolean") collapsed[c] = folded;
   }
   return { order, weights, collapsed };
 }
