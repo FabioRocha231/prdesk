@@ -32,7 +32,8 @@ export function Menu({ label, items }: { label: string; items: MenuItem[] }): Re
   if (items.length === 0) return null;
 
   const onKey = (e: KeyboardEvent<HTMLDivElement>): void => {
-    if (e.key === "Escape") {
+    // Only an open menu takes Esc; a closed one lets it reach the app (back to the board).
+    if (e.key === "Escape" && open) {
       e.stopPropagation();
       setOpen(false);
       root.current?.querySelector<HTMLButtonElement>(".menu-trigger")?.focus();
