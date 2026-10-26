@@ -613,7 +613,10 @@ export function App(): ReactElement {
         if (onBoard && target !== null && !(e.target instanceof HTMLButtonElement)) navigate(target.pr.id);
         break;
       case "c":
-        if (target !== null) void openAgent(target);
+        if (target === null) break;
+        // The terminal docks inside the PR, so from the board open the PR first or the agent runs out of sight.
+        if (onBoard) navigate(target.pr.id);
+        void openAgent(target);
         break;
       case "o":
         if (target !== null) void openUrl(target.pr.url);
