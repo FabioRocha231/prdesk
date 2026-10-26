@@ -134,6 +134,8 @@ export interface PullDetail {
   mergeable: string;
   /** GitHub will merge it by itself once reviews and required checks pass. */
   autoMerge: boolean;
+  /** The repo setting "Allow auto-merge"; off by default on GitHub. */
+  autoMergeAllowed: boolean;
   /** The viewer's default merge method for this repo: MERGE, SQUASH or REBASE. */
   mergeMethod: string;
   /** Node ids of people who already reviewed, for re-requesting their review. */

@@ -40,7 +40,7 @@ const DETAIL_QUERY = `query($id: ID!) {
     ... on PullRequest {
       bodyHTML body mergeStateStatus additions deletions changedFiles mergeable
       autoMergeRequest { enabledAt }
-      repository { viewerDefaultMergeMethod }
+      repository { viewerDefaultMergeMethod autoMergeAllowed }
       latestReviews(first: 20) { nodes { author { ... on User { id } } } }
       commits(last: 1) {
         nodes {
@@ -362,7 +362,7 @@ interface RawDetail {
     reviews: { nodes: (Omit<RawComment, "createdAt"> & { state: string; submittedAt: string })[] };
     mergeable: string;
     autoMergeRequest: { enabledAt: string } | null;
-    repository: { viewerDefaultMergeMethod: string };
+    repository: { viewerDefaultMergeMethod: string; autoMergeAllowed: boolean };
     latestReviews: { nodes: { author: { id?: string } | null }[] };
     commits: { nodes: { commit: { statusCheckRollup: { contexts: { nodes: RawContext[] } } | null } }[] };
   } | null;
@@ -447,6 +447,7 @@ export async function fetchDetail(config: Config, id: string): Promise<PullDetai
     timeline,
     mergeable: node.mergeable,
     autoMerge: node.autoMergeRequest !== null,
+    autoMergeAllowed: node.repository.autoMergeAllowed,
     mergeMethod: node.repository.viewerDefaultMergeMethod,
     reviewerIds: node.latestReviews.nodes.flatMap((r): string[] => (r.author?.id === undefined ? [] : [r.author.id])),
     checks: (node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).map(toCheck),

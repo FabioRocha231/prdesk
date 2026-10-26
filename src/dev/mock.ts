@@ -350,7 +350,7 @@ function detail(id: string): Record<string, unknown> {
       reviews: { nodes: [] },
       mergeable: seed?.mergeState === "DIRTY" ? "CONFLICTING" : "MERGEABLE",
       autoMergeRequest: null,
-      repository: { viewerDefaultMergeMethod: "SQUASH" },
+      repository: { viewerDefaultMergeMethod: "SQUASH", autoMergeAllowed: true },
       latestReviews: { nodes: [{ author: { id: "U_maria" } }] },
       commits: {
         nodes: [

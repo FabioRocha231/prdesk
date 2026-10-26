@@ -452,24 +452,29 @@ function ActionBar({
     if (detail.mergeable === "CONFLICTING") add("pr", actions.conflicts, !agentBlocked);
     if (mergeReady) add("pr", actions.merge);
     // Approved-but-waiting PRs merge themselves once CI passes, so nobody has to come back for them.
-    if (mine && !pr.isDraft && !mergeReady && !blocked)
-      add(
-        "pr",
-        detail.autoMerge
-          ? {
-              key: "auto-merge-off",
-              label: "Cancelar auto-merge",
-              icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
-              run: (): void => act("auto-merge-off", async (): Promise<void> => await disableAutoMerge(config, pr.id)),
-            }
-          : {
-              key: "auto-merge",
-              label: `Mergear quando o CI passar (${mergeLabel})`,
-              icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
-              run: (): void =>
-                act("auto-merge", async (): Promise<void> => await enableAutoMerge(config, pr.id, detail.mergeMethod)),
-            },
-      );
+    // GitHub refuses it when the repo disallows auto-merge, or when the PR is already mergeable (CLEAN) or conflicting.
+    const canAutoMerge =
+      detail.autoMergeAllowed &&
+      detail.mergeState !== "CLEAN" &&
+      detail.mergeable !== "CONFLICTING" &&
+      !pr.isDraft &&
+      !mergeReady &&
+      !blocked;
+    if (mine && detail.autoMerge)
+      add("pr", {
+        key: "auto-merge-off",
+        label: "Cancelar auto-merge",
+        icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
+        run: (): void => act("auto-merge-off", async (): Promise<void> => await disableAutoMerge(config, pr.id)),
+      });
+    else if (mine && canAutoMerge)
+      add("pr", {
+        key: "auto-merge",
+        label: `Mergear quando o CI passar (${mergeLabel})`,
+        icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
+        run: (): void =>
+          act("auto-merge", async (): Promise<void> => await enableAutoMerge(config, pr.id, detail.mergeMethod)),
+      });
     if (detail.mergeState === "BEHIND") add("pr", actions["update-branch"]);
     if (!mine && !iApproved)
       add("pr", {
