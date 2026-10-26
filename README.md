@@ -4,6 +4,12 @@ Every open pull request across your repos in one window, sorted by **whose turn 
 
 prdesk is a desktop app (macOS, Windows, Linux) built with Tauri. It runs entirely on your machine: no server, no telemetry. Your token stays in the OS keychain.
 
+![The board: every open PR sorted by whose turn it is](docs/board.png)
+
+![Inside a PR: the next step, review threads with their diff, and the agent one key away](docs/detail.png)
+
+The UI is in Brazilian Portuguese for now (*Sua vez* = your turn).
+
 ## What it does
 
 - **One board, four columns.** *Sua vez* (your turn), *Review pedido* (review requested), *Aguardando* (waiting on others) and *Outras* (everything else in your scopes, folded to a strip). Columns can be reordered, resized and folded.
@@ -44,7 +50,7 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 
 ## Setup
 
-1. Install from the [releases page](../../releases), or build it yourself (below).
+1. Install from the [releases page](../../releases), or build it yourself (below). The builds are not signed yet: on macOS, right-click the app and choose *Open* the first time; on Windows, choose *More info → Run anyway*.
 2. On first launch, prdesk uses your GitHub CLI token if `gh auth login` was done. Otherwise, paste a token with the `repo` and `read:org` scopes.
 3. Add the orgs (`acme`) and repos (`acme/api`) you want to follow. PRs that involve you appear even outside these scopes.
 
@@ -76,6 +82,10 @@ The token never reaches the webview.
 - GitLab merge requests
 - English UI (today the UI is in Brazilian Portuguese)
 - Point at an existing local clone instead of the managed workspace
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## License
 
