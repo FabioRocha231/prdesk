@@ -2,7 +2,18 @@ import type { FormEvent, ReactElement } from "react";
 import { useEffect, useState } from "react";
 
 import { type Agent, type Config, DEFAULT_CONFIG, isValidScope } from "../lib/config";
-import { clearToken, errorMessage, saveToken, type TokenSource, tokenStatus } from "../lib/ipc";
+import { refKey } from "../lib/deps";
+import { fetchPull } from "../lib/github";
+import {
+  clearToken,
+  errorMessage,
+  type PrWorktree,
+  prWorktrees,
+  removeWorktree,
+  saveToken,
+  type TokenSource,
+  tokenStatus,
+} from "../lib/ipc";
 
 const TOKEN_LABEL: Record<TokenSource, string> = {
   keychain: "Usando o token salvo no keychain do sistema.",
@@ -89,15 +100,117 @@ function newAgentId(): string {
   return `agent-${crypto.randomUUID().slice(0, 8)}`;
 }
 
+type FoundTree = PrWorktree & { closed: boolean };
+
+/** Finds worktrees whose PR is merged or closed and removes the ones with nothing unsaved in them. */
+function WorktreeCleanup({
+  config,
+  openRefs,
+  busyPaths,
+}: {
+  config: Config;
+  /** Open PRs already on the board, so only the others cost a GitHub call. */
+  openRefs: ReadonlySet<string>;
+  /** Worktrees an agent is using right now. */
+  busyPaths: ReadonlySet<string>;
+}): ReactElement {
+  const [found, setFound] = useState<FoundTree[] | null>(null);
+  const [status, setStatus] = useState<"idle" | "scanning" | "removing">("idle");
+  const [message, setMessage] = useState<string | null>(null);
+
+  const closed = (found ?? []).filter((t): boolean => t.closed);
+  const removable = closed.filter((t): boolean => !t.dirty && !t.unpushed && !busyPaths.has(t.path));
+  const kept = closed.filter((t): boolean => !removable.includes(t));
+  const name = (t: PrWorktree): string => `${t.owner}/${t.repo}#${t.number}`;
+
+  const scan = async (): Promise<void> => {
+    setStatus("scanning");
+    setMessage(null);
+    try {
+      const trees = await prWorktrees(config.workspaceDir);
+      const result: FoundTree[] = [];
+      // ponytail: one GitHub call per worktree not on the board; batch them if workspaces grow to hundreds.
+      for (const t of trees) {
+        const repo = `${t.owner}/${t.repo}`;
+        if (openRefs.has(refKey({ repo, number: t.number }))) continue;
+        try {
+          const pr = await fetchPull(config, repo, t.number);
+          result.push({ ...t, closed: pr.closed !== undefined });
+        } catch {
+          // Degraded: a PR we cannot read (deleted repo, lost access) is left alone rather than guessed closed.
+          result.push({ ...t, closed: false });
+        }
+      }
+      setFound(result);
+    } catch (e) {
+      setMessage(errorMessage(e));
+    } finally {
+      setStatus("idle");
+    }
+  };
+
+  const remove = async (): Promise<void> => {
+    setStatus("removing");
+    const failed: string[] = [];
+    // One at a time: worktrees of the same repo share a clone, and git locks it per operation.
+    for (const t of removable) {
+      try {
+        await removeWorktree(t.path, config.workspaceDir);
+      } catch (e) {
+        failed.push(`${name(t)}: ${errorMessage(e)}`);
+      }
+    }
+    const done = removable.length - failed.length;
+    setFound(null);
+    setMessage([`${done} ${done === 1 ? "worktree removido" : "worktrees removidos"}.`, ...failed].join(" "));
+    setStatus("idle");
+  };
+
+  return (
+    <div className="cleanup">
+      <div className="inline">
+        <button type="button" className="button" disabled={status !== "idle"} onClick={(): void => void scan()}>
+          {status === "scanning" ? "Procurando…" : "Procurar worktrees de PRs fechadas"}
+        </button>
+        {found !== null &&
+          (removable.length > 0 ? (
+            <button type="button" className="button" disabled={status !== "idle"} onClick={(): void => void remove()}>
+              {status === "removing"
+                ? "Removendo…"
+                : `Remover ${removable.length} ${removable.length === 1 ? "worktree" : "worktrees"}`}
+            </button>
+          ) : (
+            <span className="hint">Nenhum worktree para remover.</span>
+          ))}
+      </div>
+      {removable.length > 0 && <p className="hint">{removable.map(name).join(", ")}</p>}
+      {kept.length > 0 && (
+        <p className="hint">
+          Mantidos (mudanças locais, commits não enviados ou agente aberto): {kept.map(name).join(", ")}
+        </p>
+      )}
+      {message !== null && (
+        <p className="hint" role="status">
+          {message}
+        </p>
+      )}
+    </div>
+  );
+}
+
 export function Settings({
   config,
   firstRun,
   onSave,
   onTokenChange,
   onClose,
+  openRefs,
+  busyPaths,
 }: {
   config: Config;
   firstRun: boolean;
+  openRefs: ReadonlySet<string>;
+  busyPaths: ReadonlySet<string>;
   onSave: (config: Config) => Promise<void>;
   onTokenChange: () => void;
   onClose: () => void;
@@ -277,6 +390,7 @@ export function Settings({
               onChange={(e): void => setDraft({ ...draft, workspaceDir: e.target.value.trim() })}
             />
             <p className="hint">Vazio usa ~/PRDesk. O prdesk clona cada repo uma vez e cria um worktree por PR.</p>
+            {!firstRun && <WorktreeCleanup config={config} openRefs={openRefs} busyPaths={busyPaths} />}
           </div>
         </div>
 

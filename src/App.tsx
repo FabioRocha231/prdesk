@@ -826,6 +826,10 @@ export function App(): ReactElement {
             onSave={saveSettings}
             onTokenChange={(): void => void checkToken()}
             onClose={(): void => setView("board")}
+            openRefs={new Set((pulls ?? []).map((p): string => refKey(p)))}
+            busyPaths={
+              new Set(Object.values(sessions).flatMap((s): string[] => (s.status === "running" ? [s.cwd] : [])))
+            }
           />
         )}
 

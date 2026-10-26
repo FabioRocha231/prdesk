@@ -530,6 +530,104 @@ pub async fn commit_and_push(
     .map_err(|e| format!("Push task failed: {e}"))?
 }
 
+/// A per-PR worktree found in the workspace (`<owner>/<repo>-pr-<n>`), with what would be lost by removing it.
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PrWorktree {
+    owner: String,
+    repo: String,
+    number: u32,
+    path: String,
+    /// Uncommitted changes, or the status could not be read.
+    dirty: bool,
+    /// Commits not on the upstream, or no upstream to compare with (fork PRs): kept to be safe.
+    unpushed: bool,
+}
+
+/// "api-pr-142" → ("api", 142).
+fn parse_pr_dir(name: &str) -> Option<(&str, u32)> {
+    let (repo, number) = name.rsplit_once("-pr-")?;
+    let number = number.parse().ok()?;
+    valid_segment(repo).then_some((repo, number))
+}
+
+fn is_dirty(tree: &Path) -> bool {
+    local(tree, &["status", "--porcelain"]).map_or(true, |s| !s.trim().is_empty())
+}
+
+fn is_unpushed(tree: &Path) -> bool {
+    local(tree, &["rev-list", "--count", "@{upstream}..HEAD"])
+        .ok()
+        .and_then(|n| n.trim().parse::<u32>().ok())
+        .is_none_or(|n| n > 0)
+}
+
+fn list_pr_worktrees(workspace_dir: &str) -> Result<Vec<PrWorktree>, String> {
+    let root = workspace_root(workspace_dir)?;
+    let Ok(owners) = std::fs::read_dir(&root) else {
+        return Ok(Vec::new());
+    };
+    let mut found = Vec::new();
+    for owner_dir in owners.flatten() {
+        let owner = owner_dir.file_name().to_string_lossy().into_owned();
+        let Ok(entries) = std::fs::read_dir(owner_dir.path()) else {
+            continue;
+        };
+        for entry in entries.flatten() {
+            let name = entry.file_name().to_string_lossy().into_owned();
+            let Some((repo, number)) = parse_pr_dir(&name) else {
+                continue;
+            };
+            let tree = entry.path();
+            // A worktree has a `.git` file pointing at the shared clone; anything else is not ours to touch.
+            if !tree.join(".git").is_file() || !valid_segment(&owner) {
+                continue;
+            }
+            found.push(PrWorktree {
+                owner: owner.clone(),
+                repo: repo.to_owned(),
+                number,
+                path: path_str(&tree)?,
+                dirty: is_dirty(&tree),
+                unpushed: is_unpushed(&tree),
+            });
+        }
+    }
+    Ok(found)
+}
+
+/// Per-PR worktrees in the workspace, for cleaning up the ones whose PR is closed.
+#[tauri::command]
+pub async fn pr_worktrees(workspace_dir: String) -> Result<Vec<PrWorktree>, String> {
+    tauri::async_runtime::spawn_blocking(move || list_pr_worktrees(&workspace_dir))
+        .await
+        .map_err(|e| format!("Worktree scan failed: {e}"))?
+}
+
+fn remove_tree(tree: &Path) -> Result<(), String> {
+    // Checked again here: the UI's scan may be stale, and nothing unsaved may be lost.
+    if is_dirty(tree) || is_unpushed(tree) {
+        return Err("This worktree has local changes or unpushed commits; it was kept.".into());
+    }
+    let common = local(tree, &["rev-parse", "--git-common-dir"])?;
+    let common = tree.join(common.trim());
+    let clone = common
+        .parent()
+        .ok_or("Could not find the repository clone.")?;
+    // No --force: git itself refuses to drop a worktree with changes.
+    local(clone, &["worktree", "remove", "--", &path_str(tree)?]).map(|_| ())
+}
+
+/// Removes a clean, fully pushed per-PR worktree. The shared clone and the branch stay.
+#[tauri::command]
+pub async fn remove_worktree(path: String, workspace_dir: String) -> Result<(), String> {
+    tauri::async_runtime::spawn_blocking(move || {
+        remove_tree(&inside_workspace(&path, &workspace_dir)?)
+    })
+    .await
+    .map_err(|e| format!("Worktree removal failed: {e}"))?
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -543,6 +641,15 @@ mod tests {
         assert!(!valid_ref("--upload-pack=evil"));
         assert!(!valid_ref("a..b"));
         assert!(!valid_ref("a b"));
+    }
+
+    #[test]
+    fn reads_pr_worktree_names() {
+        assert_eq!(parse_pr_dir("api-pr-142"), Some(("api", 142)));
+        assert_eq!(parse_pr_dir("my-pr-tool-pr-7"), Some(("my-pr-tool", 7)));
+        assert_eq!(parse_pr_dir("api-add-retry"), None);
+        assert_eq!(parse_pr_dir("api-pr-x"), None);
+        assert_eq!(parse_pr_dir("..-pr-1"), None);
     }
 
     #[test]

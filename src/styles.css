@@ -3736,3 +3736,9 @@ button.tree-pill:hover {
   color: var(--amber);
   font-size: 0.8125rem;
 }
+
+.cleanup {
+  display: grid;
+  gap: 8px;
+  margin-top: 12px;
+}

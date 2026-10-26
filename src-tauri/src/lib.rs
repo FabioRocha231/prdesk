@@ -58,6 +58,8 @@ pub fn run() {
             workspace::worktree_changes,
             workspace::commit_and_push,
             workspace::prepare_worktree,
+            workspace::pr_worktrees,
+            workspace::remove_worktree,
             pty::pty_spawn,
             pty::pty_attach,
             pty::pty_write,

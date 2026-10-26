@@ -115,6 +115,25 @@ export async function worktreeChanges(path: string, workspaceDir: string): Promi
   return await invoke<Changes>("worktree_changes", { path, workspaceDir });
 }
 
+/** A per-PR worktree in the workspace and whether removing it would lose work. */
+export interface PrWorktree {
+  owner: string;
+  repo: string;
+  number: number;
+  path: string;
+  dirty: boolean;
+  unpushed: boolean;
+}
+
+export async function prWorktrees(workspaceDir: string): Promise<PrWorktree[]> {
+  return await invoke<PrWorktree[]>("pr_worktrees", { workspaceDir });
+}
+
+/** Removes a clean, pushed worktree; Rust refuses one with local work. */
+export async function removeWorktree(path: string, workspaceDir: string): Promise<void> {
+  await invoke("remove_worktree", { path, workspaceDir });
+}
+
 /** Commits everything (when dirty) and pushes; returns the short HEAD sha. */
 export async function commitAndPush(
   path: string,
