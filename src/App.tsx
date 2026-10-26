@@ -578,6 +578,8 @@ export function App(): ReactElement {
       return;
     }
     if (e.key === "p") {
+      // Otherwise the "p" lands in the dialog's first field.
+      e.preventDefault();
       setNewTaskOpen(true);
       return;
     }

@@ -56,10 +56,15 @@ export function NewTaskDialog({
   const [text, setText] = useState("");
   const [branch, setBranch] = useState<string | null>(null);
   const finalBranch = branch ?? branchFor(text);
-  const valid = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo) && text.trim() !== "" && finalBranch !== "";
+  const repoOk = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo);
+  const valid = repoOk && text.trim() !== "" && finalBranch !== "";
+  // Says what is missing instead of leaving a silent disabled button.
+  const missing = !repoOk ? "Escolha o repositório (dono/repo)." : text.trim() === "" ? "Descreva a tarefa." : null;
 
   useEffect((): void => {
     dialog.current?.showModal();
+    // showModal focuses the first field (the repo); the task text is what you type first.
+    dialog.current?.querySelector("textarea")?.focus();
   }, []);
 
   return (
@@ -109,7 +114,6 @@ export function NewTaskDialog({
               className="input"
               rows={5}
               maxLength={MAX_TASK}
-              autoFocus
               placeholder="Ex.: adicionar retry com backoff no envio de webhooks e cobrir com teste"
               value={text}
               onChange={(e): void => setText(e.target.value)}
@@ -117,15 +121,23 @@ export function NewTaskDialog({
           </label>
           <label className="nt-field">
             <span>Branch</span>
-            <input className="input mono" value={finalBranch} onChange={(e): void => setBranch(e.target.value)} />
+            <input
+              className="input mono"
+              placeholder="gerada a partir da tarefa"
+              value={branch ?? (text.trim() === "" ? "" : finalBranch)}
+              onChange={(e): void => setBranch(e.target.value)}
+            />
           </label>
           <p className="hint">
             O app cria a branch a partir da principal num worktree e abre o agente com a tarefa. Quando terminar, a IA
             escreve título e descrição e você abre a PR daqui.
           </p>
-          <button type="submit" className="button primary" disabled={!valid}>
-            <Rocket size={16} strokeWidth={2} aria-hidden /> Criar branch e abrir o agente
-          </button>
+          <div className="inline">
+            <button type="submit" className="button primary" disabled={!valid}>
+              <Rocket size={16} strokeWidth={2} aria-hidden /> Criar branch e abrir o agente
+            </button>
+            {missing !== null && <span className="hint">{missing}</span>}
+          </div>
         </div>
       </form>
     </dialog>
