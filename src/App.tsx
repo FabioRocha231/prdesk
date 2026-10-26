@@ -646,7 +646,17 @@ export function App(): ReactElement {
   return (
     <div className="app">
       <header className="band">
-        <span className="wordmark">prdesk</span>
+        <button
+          type="button"
+          className="wordmark"
+          title="Voltar ao quadro"
+          onClick={(): void => {
+            setView("board");
+            navigate(null);
+          }}
+        >
+          prdesk
+        </button>
         <button
           type="button"
           className={sync.error === null ? "band-sync" : "band-sync is-error"}

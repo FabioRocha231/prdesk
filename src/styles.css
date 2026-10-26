@@ -212,6 +212,10 @@ kbd {
   text-transform: uppercase;
 }
 
+.wordmark:hover {
+  color: var(--cyan);
+}
+
 .wordmark::before {
   content: "";
   width: 10px;
