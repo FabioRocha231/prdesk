@@ -123,7 +123,8 @@ export function Settings({
   // Capture phase: runs before the app's Esc handler, which would leave settings right away.
   useEffect((): (() => void) => {
     const onKey = (e: KeyboardEvent): void => {
-      if (e.key !== "Escape" || !dirty || firstRun) return;
+      // A dialog open over settings (help, new PR) takes its own Esc.
+      if (e.key !== "Escape" || !dirty || firstRun || document.querySelector("dialog[open]") !== null) return;
       e.stopPropagation();
       setLeaving(true);
     };
