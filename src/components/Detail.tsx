@@ -289,6 +289,7 @@ function ActionBar({
   onShowFiles,
   onSnooze,
   onChanged,
+  extra,
 }: {
   config: Config;
   item: TriagedPull;
@@ -305,6 +306,8 @@ function ActionBar({
   onShowFiles: () => void;
   onSnooze: (choice: SnoozeChoice) => void;
   onChanged: () => void;
+  /** Items the caller adds to the menu, such as switching agents. */
+  extra: MenuItem[];
 }): ReactElement {
   const action = useAction();
   const [confirmMerge, setConfirmMerge] = useState(false);
@@ -501,6 +504,7 @@ function ActionBar({
     add("later", { key: "monday", label: "Adiar até segunda, 9h", icon: clock, run: (): void => onSnooze("monday") });
     add("later", { key: "change", label: "Adiar até ela mudar", icon: clock, run: (): void => onSnooze("change") });
   }
+  menu.push(...extra);
   add("out", {
     key: "github",
     label: "Abrir no GitHub (O)",
@@ -852,20 +856,19 @@ export function Detail({
               onShowFiles={(): void => setTab("files")}
               onSnooze={onSnooze}
               onChanged={onChanged}
+              extra={agents
+                .filter((a): boolean => a.id !== agentId)
+                .map(
+                  (a): MenuItem => ({
+                    key: `agent-${a.id}`,
+                    label: `Usar o ${a.name}`,
+                    icon: <Bot size={15} strokeWidth={2} aria-hidden />,
+                    group: "agent",
+                    onSelect: (): void => onAgentChange(a.id),
+                  }),
+                )}
             />
             <div className="agent-pick">
-              <label className="visually-hidden" htmlFor="agent-select">
-                Agente
-              </label>
-              <select id="agent-select" value={agentId} onChange={(e): void => onAgentChange(e.target.value)}>
-                {agents.map(
-                  (a): ReactElement => (
-                    <option key={a.id} value={a.id}>
-                      {a.name}
-                    </option>
-                  ),
-                )}
-              </select>
               <button type="button" onClick={(): void => onOpenAgent()} disabled={agentBusy}>
                 <Play size={15} strokeWidth={2.5} aria-hidden />
                 {agentBusy ? "Preparando…" : `Abrir no ${agent?.name ?? "agente"}`}
