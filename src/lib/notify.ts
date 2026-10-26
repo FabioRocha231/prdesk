@@ -1,3 +1,4 @@
+import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { isPermissionGranted, requestPermission, sendNotification } from "@tauri-apps/plugin-notification";
 
@@ -50,12 +51,17 @@ export function describe(a: Activity): { title: string; body: string } {
   };
 }
 
-/** Mirrors the my-turn count on the app icon (macOS/Linux). */
+/** Mirrors the my-turn count on the app icon (macOS/Linux) and next to the tray icon (every OS). */
 export async function setBadge(myTurn: number): Promise<void> {
+  try {
+    await invoke("set_tray_count", { count: myTurn });
+  } catch {
+    // Degraded: no tray (plain browser); the board still shows the count.
+  }
   try {
     await getCurrentWindow().setBadgeCount(myTurn > 0 ? myTurn : undefined);
   } catch {
-    // Degraded: badges are unsupported on Windows; the board still shows the count.
+    // Degraded: badges are unsupported on Windows; the tray carries the count there.
   }
 }
 

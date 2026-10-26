@@ -5,6 +5,8 @@ mod graph;
 mod pty;
 mod workspace;
 
+use tauri::menu::{Menu, MenuItem};
+use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Manager};
 use tauri_plugin_global_shortcut::ShortcutState;
 
@@ -17,6 +19,55 @@ fn summon(app: &AppHandle) {
         let _ = window.show();
         let _ = window.set_focus();
     }
+}
+
+const TRAY_ID: &str = "main";
+
+/// Tray icon: click (or "Abrir") brings the window back; the title and tooltip carry the my-turn count.
+fn tray(app: &AppHandle) -> tauri::Result<()> {
+    let open = MenuItem::with_id(app, "open", "Abrir prdesk", true, None::<&str>)?;
+    let quit = MenuItem::with_id(app, "quit", "Sair", true, None::<&str>)?;
+    let mut builder = TrayIconBuilder::with_id(TRAY_ID)
+        .tooltip("prdesk")
+        .menu(&Menu::with_items(app, &[&open, &quit])?)
+        .show_menu_on_left_click(false)
+        .on_menu_event(|app, event| match event.id.as_ref() {
+            "open" => summon(app),
+            "quit" => app.exit(0),
+            _ => {}
+        })
+        .on_tray_icon_event(|tray, event| {
+            if let TrayIconEvent::Click {
+                button: MouseButton::Left,
+                button_state: MouseButtonState::Up,
+                ..
+            } = event
+            {
+                summon(tray.app_handle());
+            }
+        });
+    if let Some(icon) = app.default_window_icon() {
+        builder = builder.icon(icon.clone());
+    }
+    builder.build(app)?;
+    Ok(())
+}
+
+/// Shows how many PRs are my turn next to the tray icon (title on macOS/Linux, tooltip everywhere).
+#[tauri::command]
+fn set_tray_count(app: AppHandle, count: u32) {
+    let Some(tray) = app.tray_by_id(TRAY_ID) else {
+        return;
+    };
+    let label = (count > 0).then(|| count.to_string());
+    // Degraded: Windows has no tray title; the tooltip still says it.
+    let _ = tray.set_title(label.as_deref());
+    let tooltip = match count {
+        0 => "prdesk: nada esperando você".to_owned(),
+        1 => "prdesk: 1 PR esperando você".to_owned(),
+        n => format!("prdesk: {n} PRs esperando você"),
+    };
+    let _ = tray.set_tooltip(Some(tooltip));
 }
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -37,9 +88,11 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .setup(|app| Ok(tray(app.handle())?))
         .manage(auth::TokenCache::default())
         .manage(pty::Sessions::default())
         .invoke_handler(tauri::generate_handler![
+            set_tray_count,
             auth::token_status,
             auth::save_token,
             auth::clear_token,
