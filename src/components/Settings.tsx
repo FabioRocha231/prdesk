@@ -115,6 +115,21 @@ export function Settings({
   const badAgents = draft.agents.filter((a): boolean => a.name.trim() === "" || !a.command.includes("{prompt}"));
   const apiOk = draft.apiUrl.startsWith("https://");
   const valid = badScopes.length === 0 && badAgents.length === 0 && apiOk;
+  const dirty = JSON.stringify({ ...draft, scopes }) !== JSON.stringify(config);
+  // Leaving with unsaved edits asks first instead of dropping them.
+  const [leaving, setLeaving] = useState(false);
+  const leave = (): void => (dirty ? setLeaving(true) : onClose());
+
+  // Capture phase: runs before the app's Esc handler, which would leave settings right away.
+  useEffect((): (() => void) => {
+    const onKey = (e: KeyboardEvent): void => {
+      if (e.key !== "Escape" || !dirty || firstRun) return;
+      e.stopPropagation();
+      setLeaving(true);
+    };
+    window.addEventListener("keydown", onKey, true);
+    return (): void => window.removeEventListener("keydown", onKey, true);
+  }, [dirty, firstRun]);
 
   const updateAgent = (id: string, patch: Partial<Agent>): void =>
     setDraft({ ...draft, agents: draft.agents.map((a): Agent => (a.id === id ? { ...a, ...patch } : a)) });
@@ -278,11 +293,22 @@ export function Settings({
           <button type="submit" className="button primary" disabled={!valid || saving}>
             {saving ? "Salvando…" : "Salvar"}
           </button>
-          {!firstRun && (
-            <button type="button" className="text-button" onClick={onClose}>
-              Voltar ao quadro <kbd>esc</kbd>
-            </button>
-          )}
+          {!firstRun &&
+            (leaving ? (
+              <span className="settings-leave" role="alert">
+                Alterações não salvas.
+                <button type="button" className="text-button" onClick={onClose}>
+                  Descartar e voltar
+                </button>
+                <button type="button" className="text-button" onClick={(): void => setLeaving(false)}>
+                  Continuar editando
+                </button>
+              </span>
+            ) : (
+              <button type="button" className="text-button" onClick={leave}>
+                Voltar ao quadro <kbd>esc</kbd>
+              </button>
+            ))}
           <button
             type="button"
             className="text-button"

@@ -1756,7 +1756,7 @@ button.chain-node:hover {
   grid-template-columns: repeat(12, minmax(0, 1fr));
   column-gap: var(--gutter);
   align-content: start;
-  padding: 0 var(--gutter) 72px;
+  padding: 0 var(--gutter);
 }
 
 .settings-intro {
@@ -1910,8 +1910,13 @@ textarea.input {
   align-items: center;
 }
 
+/* Stays in view while scrolling so Save is never hidden below the fold. */
 .settings-save {
-  padding-top: 14px;
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
+  padding: 14px 0;
+  background: var(--void);
   display: flex;
   flex-wrap: wrap;
   gap: 18px 24px;
@@ -3709,4 +3714,12 @@ button.tree-pill:hover {
     clip-path: inset(50%);
     white-space: nowrap;
   }
+}
+
+.settings-leave {
+  display: inline-flex;
+  align-items: center;
+  gap: 16px;
+  color: var(--amber);
+  font-size: 0.8125rem;
 }
