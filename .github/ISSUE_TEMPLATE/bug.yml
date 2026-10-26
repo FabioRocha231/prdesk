@@ -1,0 +1,33 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: What you saw, and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Open a PR from the board
+        2. Press c
+        3. …
+    validations:
+      required: true
+  - type: input
+    id: os
+    attributes:
+      label: OS and prdesk version
+      placeholder: macOS 15, prdesk 0.1.0
+    validations:
+      required: true
+  - type: input
+    id: agent
+    attributes:
+      label: Agent, if relevant
+      placeholder: Claude Code / Codex / OpenCode / other
