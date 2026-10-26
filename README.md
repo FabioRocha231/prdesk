@@ -6,10 +6,14 @@ prdesk is a desktop app (macOS, Windows, Linux) built with Tauri. It runs entire
 
 ## What it does
 
-- **One board, four columns.** *Sua vez* (your turn), *Review pedido* (review requested), *Aguardando* (waiting on others) and *Outras* (everything else in your scopes).
-- **Proof next to every status.** Each row shows who acted last and when. Rows that are your turn also quote the comment that is waiting on you.
-- **Review threads, rendered.** Each thread shows the diff hunk it was left on and the conversation under it, plus the general comments and the description.
-- **Open in your agent.** Pick Claude Code, Codex or OpenCode, or add your own, and press `c`. prdesk clones the repo once into `~/PRDesk`, creates a worktree for the PR's branch, and starts the agent in an embedded terminal with the context already in the prompt. You never need a separate terminal.
+- **One board, four columns.** *Sua vez* (your turn), *Review pedido* (review requested), *Aguardando* (waiting on others) and *Outras* (everything else in your scopes, folded to a strip). Columns can be reordered, resized and folded.
+- **Proof next to every status.** Each card shows who acted last and when, plus flags for conflicts, failing CI, drafts and approvals.
+- **The next step, one click away.** Inside a PR, one highlighted button says what to do now (review the files, resolve everything with the agent, merge, update the branch); the rest lives in *Mais*.
+- **Review without leaving the app.** The full diff with line comments and "viewed" marks, review threads with their diff hunk, replies and resolve, the conversation, CI checks with re-run, and the PR's branch tree.
+- **Open in your agent.** Pick Claude Code, Codex or OpenCode, or add your own, and press `c`. prdesk clones the repo once into `~/PRDesk`, creates a worktree for the PR's branch, and starts the agent in an embedded terminal with the context already in the prompt. The card shows whether the agent is working or waiting on you, and a notification tells you when it goes quiet.
+- **AI on the side.** Analyze a PR (summary, risks, draft comments), draft replies, rewrite descriptions, or describe a task and get a new branch, the agent's work and a written PR.
+- **Less to keep in your head.** *Novidades* (GitHub notifications), *Encadeadas* (PRs that declare "Depends on org/repo#123", in merge order), snooze until tomorrow, Monday or the next change, a daily summary to paste, auto-merge once CI passes, and a tray icon with your my-turn count.
+- **Housekeeping.** Settings finds worktrees of closed PRs and removes the ones with nothing unsaved in them.
 
 ### How "whose turn" is decided
 
@@ -28,9 +32,15 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 | `Enter` | Open the highlighted PR |
 | `c` | Open the selected PR in the agent |
 | `o` | Open the selected PR on GitHub |
+| `⌘K` / `Ctrl+K` | Search PRs |
+| `n` | Novidades (notifications) |
+| `p` | New PR with the agent |
+| `t` | Branch tree |
 | `r` | Refresh |
 | `,` | Settings |
+| `?` | Help |
 | `Esc` | Close the PR / leave settings |
+| `⌘⇧P` / `Ctrl+Shift+P` | Bring prdesk to the front from anywhere |
 
 ## Setup
 
@@ -49,7 +59,7 @@ pnpm install
 pnpm tauri dev          # the app
 pnpm dev                # UI only; open http://localhost:1420/?mock for synthetic data, no token needed
 pnpm typecheck && pnpm lint && pnpm test
-cd src-tauri && cargo clippy && cargo test
+cd src-tauri && cargo fmt --check && cargo clippy --all-targets -- -D warnings && cargo test
 ```
 
 Architecture in one paragraph: the React UI (`src/`) builds the GraphQL queries and decides whose turn it is (`src/lib/triage.ts`, pure and tested). Rust (`src-tauri/src/`) owns everything that touches secrets or the machine:
@@ -57,14 +67,14 @@ Architecture in one paragraph: the React UI (`src/`) builds the GraphQL queries 
 - the GitHub HTTP call (`github.rs`)
 - cloning and worktrees (`workspace.rs`)
 - the PTY behind the embedded terminal (`pty.rs`)
+- headless agent runs for the AI features (`agent.rs`)
 
 The token never reaches the webview.
 
 ## Roadmap
 
 - GitLab merge requests
-- Reply to and resolve threads from the app
-- Clean up worktrees when a PR closes
+- English UI (today the UI is in Brazilian Portuguese)
 - Point at an existing local clone instead of the managed workspace
 
 ## License
