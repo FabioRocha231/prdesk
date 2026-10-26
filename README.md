@@ -50,11 +50,23 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 
 ## Setup
 
-1. Install from the [releases page](../../releases), or build it yourself (below). The builds are not signed yet: on macOS, right-click the app and choose *Open* the first time; on Windows, choose *More info → Run anyway*.
+1. Install from the [releases page](../../releases), or build it yourself (below). The builds are not signed yet, so the first launch needs one extra step (see [Opening an unsigned build](#opening-an-unsigned-build)).
 2. On first launch, prdesk uses your GitHub CLI token if `gh auth login` was done. Otherwise, paste a token with the `repo` and `read:org` scopes.
 3. Add the orgs (`acme`) and repos (`acme/api`) you want to follow. PRs that involve you appear even outside these scopes.
 
 The agent commands are templates: `{prompt}` is replaced by prdesk's instructions. For example, `claude {prompt}` or `opencode --prompt {prompt}`. They run in your login shell, so whatever works in your terminal works here.
+
+### Opening an unsigned build
+
+**macOS.** Drag prdesk to *Applications* and open it. macOS refuses the first time; click *Done* (not *Move to Trash*). Then open *System Settings → Privacy & Security*, scroll to the bottom and click *Open Anyway* next to prdesk. From then on it opens normally. Right-click → *Open* no longer works for this since macOS 15.
+
+If macOS says prdesk "is damaged and can't be opened", the download is only quarantined. Clear the flag and open it again:
+
+```sh
+xattr -dr com.apple.quarantine /Applications/prdesk.app
+```
+
+**Windows.** On the SmartScreen prompt, choose *More info → Run anyway*.
 
 ## Development
 
