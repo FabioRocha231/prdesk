@@ -483,7 +483,7 @@ export function ThreadsTab({
         {bots.length > 0 && (
           <details className="fold">
             <summary>
-              Conversas de bots <b>{bots.length}</b>
+              Comentários de bots <b>{bots.length}</b>
             </summary>
             {prIsMine && (
               <div className="fold-actions">
