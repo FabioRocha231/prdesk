@@ -645,11 +645,12 @@ kbd {
   overflow: hidden;
 }
 
-/* Reason and flags share one line: the reason gives way, flags stay whole. */
+/* Reason and flags share one line when they fit; otherwise the flags wrap below so the reason stays readable. */
 .row-meta {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
-  gap: 10px;
+  gap: 6px 10px;
   min-width: 0;
   color: var(--text-3);
   font-size: 0.8125rem;
