@@ -113,6 +113,8 @@ export function App(): ReactElement {
   const [pulls, setPulls] = useState<PullRequest[] | null>(null);
   const [sync, setSync] = useState<Sync>({ loading: false, at: null, error: null });
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  // Highlighted card on the full board: j/k move it, Enter opens it.
+  const [cursor, setCursor] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, DetailState>>({});
   const [sessions, setSessions] = useState<Record<string, Session>>({});
   const [agentId, setAgentId] = useState("");
@@ -508,6 +510,8 @@ export function App(): ReactElement {
 
   // Entering or leaving a PR morphs the row's title into the detail heading.
   const navigate = (id: string | null): void => {
+    // Back on the board, the card I was on stays highlighted.
+    if (id === null && selectedId !== null) setCursor(selectedId);
     const crossing = (id === null) !== (selectedId === null);
     if (crossing) transition((): void => setSelectedId(id));
     else setSelectedId(id);
@@ -546,7 +550,7 @@ export function App(): ReactElement {
     }
   };
 
-  // Keyboard: j/k move, c agent, o GitHub, r refresh, n feed, "," settings, Esc back.
+  // Keyboard: j/k move, Enter open, c agent, o GitHub, r refresh, n feed, "," settings, Esc back.
   const keyRef = useRef<(e: KeyboardEvent) => void>((): void => {});
   keyRef.current = (e: KeyboardEvent): void => {
     if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k" && view === "board") {
@@ -583,11 +587,16 @@ export function App(): ReactElement {
     }
     if (view !== "board") return;
 
-    const index = ordered.findIndex((p): boolean => p.pr.id === selectedId);
+    // On the full board j/k only move the highlight; inside a PR they switch PRs.
+    const onBoard = selectedId === null;
+    const index = ordered.findIndex((p): boolean => p.pr.id === (onBoard ? cursor : selectedId));
+    const target = onBoard ? (ordered[index] ?? null) : selected;
     const step = (delta: number): void => {
       e.preventDefault();
       const next = ordered[Math.min(ordered.length - 1, Math.max(0, index === -1 ? 0 : index + delta))];
-      if (next !== undefined) navigate(next.pr.id);
+      if (next === undefined) return;
+      if (onBoard) setCursor(next.pr.id);
+      else navigate(next.pr.id);
     };
     switch (e.key) {
       case "j":
@@ -598,11 +607,14 @@ export function App(): ReactElement {
       case "ArrowUp":
         step(-1);
         break;
+      case "Enter":
+        if (onBoard && target !== null && !(e.target instanceof HTMLButtonElement)) navigate(target.pr.id);
+        break;
       case "c":
-        if (selected !== null) void openAgent(selected);
+        if (target !== null) void openAgent(target);
         break;
       case "o":
-        if (selected !== null) void openUrl(selected.pr.url);
+        if (target !== null) void openUrl(target.pr.url);
         break;
       case "r":
         void refresh();
@@ -610,6 +622,11 @@ export function App(): ReactElement {
         break;
     }
   };
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: re-runs when the highlight moves; the DOM holds the row
+  useEffect((): void => {
+    document.querySelector('.board:not(.rail) .row[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
+  }, [cursor]);
 
   useEffect((): (() => void) => {
     const onKey = (e: KeyboardEvent): void => keyRef.current(e);
@@ -842,7 +859,7 @@ export function App(): ReactElement {
             groups={groups}
             deps={deps}
             loading={pulls === null}
-            selectedId={null}
+            selectedId={cursor}
             rail={false}
             onSelect={navigate}
           />

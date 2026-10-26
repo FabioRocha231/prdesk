@@ -25,6 +25,7 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 | Key | Action |
 |---|---|
 | `j` / `k` | Next / previous PR |
+| `Enter` | Open the highlighted PR |
 | `c` | Open the selected PR in the agent |
 | `o` | Open the selected PR on GitHub |
 | `r` | Refresh |

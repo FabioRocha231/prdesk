@@ -42,6 +42,7 @@ const GUIDE: { title: string; items: [string, string][] }[] = [
 
 const KEYS: [string, string][] = [
   ["J / K", "próxima / anterior"],
+  ["Enter", "abrir a PR destacada"],
   ["Esc", "voltar ao quadro"],
   ["C", "abrir no agente"],
   ["O", "abrir no GitHub"],
