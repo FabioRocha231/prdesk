@@ -28,5 +28,6 @@ CI runs all of the above; keep it green before pushing.
 
 <!-- engineering-learn:live -->
 - State that is written after a long `await` (cloning, an agent run, a push, a loop of GitHub calls) must be written with a functional update (`setX((all) => …)`), never from the render's captured copy: anything that changed meanwhile would be overwritten (e.g. mission delivery and launch now use `updateTasks`).
+- Before hiding or disabling an action because of something that already happened (an approval, a review, a request), check whether a later event undid it: compare its time with the PR's `lastCommitAt` like `nextStep` does, so an approval from before the last push still lets the reviewer approve again.
 <!-- /engineering-learn:live -->
 <!-- /engineering-learn:live -->
