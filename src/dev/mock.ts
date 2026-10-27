@@ -207,6 +207,9 @@ function rawPull(s: Seed): Record<string, unknown> {
     mergeable: s.mergeState === "DIRTY" ? "CONFLICTING" : "MERGEABLE",
     mergeStateStatus: s.mergeState ?? "CLEAN",
     isCrossRepository: false,
+    additions: (s.n * 37) % 480,
+    deletions: (s.n * 13) % 160,
+    changedFiles: 1 + (s.n % 14),
     reviewDecision: s.decision ?? null,
     repository: { nameWithOwner: s.repo, url: `https://github.com/${s.repo}` },
     author: { login: s.author },
@@ -747,6 +750,11 @@ export function installMocks(): void {
         return [null, false];
       case "plugin:event|listen":
         return nextId++;
+      // `?mock&update` pretends a newer release is out, to see the header button.
+      case "plugin:updater|check":
+        return new URLSearchParams(window.location.search).has("update")
+          ? { rid: nextId++, currentVersion: "0.2.0", version: "0.2.1", date: null, body: "", rawJson: {} }
+          : null;
       default:
         return null;
     }

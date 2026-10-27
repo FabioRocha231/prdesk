@@ -1,5 +1,4 @@
 use std::path::{Path, PathBuf};
-use std::process::Command;
 
 use base64::Engine;
 use serde::{Deserialize, Serialize};
@@ -74,7 +73,7 @@ pub(crate) fn workspace_root(dir: &str) -> Result<PathBuf, String> {
 /// Returns stdout.
 fn git(cwd: Option<&Path>, origin: &str, token: &str, args: &[&str]) -> Result<String, String> {
     let basic = base64::engine::general_purpose::STANDARD.encode(format!("x-access-token:{token}"));
-    let mut cmd = Command::new("git");
+    let mut cmd = crate::command("git");
     if let Some(dir) = cwd {
         cmd.current_dir(dir);
     }
@@ -106,7 +105,7 @@ fn git(cwd: Option<&Path>, origin: &str, token: &str, args: &[&str]) -> Result<S
 
 /// Local-only git (status, diff): no network, so no token header.
 pub(crate) fn local(tree: &Path, args: &[&str]) -> Result<String, String> {
-    let out = Command::new("git")
+    let out = crate::command("git")
         .current_dir(tree)
         .args(args)
         .output()

@@ -191,7 +191,7 @@ pub async fn git_fetch(path: String) -> Result<(), String> {
     tauri::async_runtime::spawn_blocking(move || {
         let root = repo_root(&path)?;
         // ponytail: no timeout; a hung remote leaves the "Atualizar" spinner on until git gives up.
-        let out = std::process::Command::new("git")
+        let out = crate::command("git")
             .current_dir(&root)
             .args(["fetch", "--all", "--prune", "--quiet"])
             .env("GIT_TERMINAL_PROMPT", "0")

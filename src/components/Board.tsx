@@ -1,4 +1,4 @@
-import { GripVertical, Hourglass, Info, Lock, PanelLeftClose } from "lucide-react";
+import { GripVertical, Hourglass, Info, Lock, MessageSquare, PanelLeftClose, UserPlus } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -8,7 +8,10 @@ import { age } from "../lib/format";
 import { DEFAULT_LAYOUT, gridTemplate, type LaneLayout, moveLane, normalizeLayout, resizePair } from "../lib/lanes";
 import { COLUMN_HINT, COLUMN_LABEL, COLUMNS, type Column, type PullRequest, type TriagedPull } from "../lib/model";
 import { loadValue, saveValue } from "../lib/persist";
+import { needsReviewers, usualReviewers } from "../lib/reviewers";
+import { prCrew, prTrack } from "../lib/track";
 import { blockers } from "./Daily";
+import { useAction } from "./useAction";
 
 const EMPTY: Record<Column, string> = {
   myTurn: "Tudo em dia. Nada esperando por você.",
@@ -70,6 +73,109 @@ function Flags({ item, agent }: { item: TriagedPull; agent: AgentState | undefin
         ),
       )}
     </span>
+  );
+}
+
+const CREW_TITLE: Record<string, string> = {
+  approved: "aprovou",
+  changes: "pediu mudanças",
+  commented: "comentou",
+  asked: "review pedido, sem resposta ainda",
+};
+
+/**
+ * The detailed card: the PR's life on one line (opened on the left, now on the right, the idle stretch dashed in the
+ * column's hue), then who is reviewing and how big it is.
+ */
+function Telemetry({ pr, me, now }: { pr: PullRequest; me: string; now: number }): ReactElement {
+  const track = prTrack(pr, now);
+  const crew = prCrew(pr);
+  const openThreads = pr.threads.filter((t): boolean => !t.isResolved && !t.lastIsBot).length;
+  const story = track.marks.map((m): string => m.label).join(", ");
+  return (
+    <span className="telemetry">
+      <span className="track" role="img" aria-label={story === "" ? "nada aconteceu desde que abriu" : story}>
+        <span className="track-idle" style={{ left: `${track.idleFrom * 100}%` }} />
+        {track.marks.map(
+          (m): ReactElement => (
+            <span
+              key={`${m.kind}-${m.at}-${m.label}`}
+              className={`mark mark-${m.kind}`}
+              style={{ left: `${m.at * 100}%` }}
+              title={m.label}
+            />
+          ),
+        )}
+      </span>
+      <span className="crew-line">
+        {crew.length === 0 && <span className="crew-none">ninguém revisando</span>}
+        {crew.map(
+          (c): ReactElement => (
+            <span key={c.login} className={`crew crew-${c.state}`} title={`${c.login}: ${CREW_TITLE[c.state]}`}>
+              {c.login === me ? "você" : c.login}
+            </span>
+          ),
+        )}
+        <span className="facts">
+          {openThreads > 0 && (
+            <span className="fact" title={`${openThreads} conversa(s) aberta(s)`}>
+              <MessageSquare size={12} strokeWidth={2} aria-hidden /> {openThreads}
+            </span>
+          )}
+          {pr.size !== undefined && (
+            <span className="fact" title={`${pr.size.files} arquivo(s)`}>
+              <b className="fact-add">+{pr.size.additions}</b> <b className="fact-del">−{pr.size.deletions}</b>
+            </span>
+          )}
+        </span>
+      </span>
+    </span>
+  );
+}
+
+export type AskReview = (pr: PullRequest, logins: string[]) => Promise<void>;
+
+/** "Pedir review a bia e caio": readies a draft and asks whoever usually reviews in the repo. */
+function AskReviewButton({
+  pr,
+  logins,
+  onAsk,
+}: {
+  pr: PullRequest;
+  logins: string[];
+  onAsk: AskReview;
+}): ReactElement | null {
+  const action = useAction();
+  const [done, setDone] = useState(false);
+  if (done) return null;
+  const who = logins.join(" e ");
+  const label = logins.length > 0 ? `Pedir review a ${who}` : "Marcar como pronta";
+  const title = pr.isDraft
+    ? `Marca a PR como pronta para review${logins.length > 0 ? ` e pede review a ${who}, quem mais revisa neste repo` : "; o GitHub chama os code owners"}`
+    : `Pede review a ${who}, quem mais revisa neste repo`;
+  return (
+    <>
+      <button
+        type="button"
+        className="ask-review"
+        title={title}
+        disabled={action.pending !== null}
+        onClick={(): void =>
+          void action.run("ask", async (): Promise<void> => {
+            await onAsk(pr, logins);
+            setDone(true);
+          })
+        }
+      >
+        <UserPlus size={13} strokeWidth={2} aria-hidden />
+        {action.pending === null ? label : "Pedindo…"}
+      </button>
+      {action.error !== null && (
+        <span className="ask-error" role="alert">
+          {action.error}
+        </span>
+      )}
+    </>
   );
 }
 
@@ -203,11 +309,22 @@ function Row({
   rail,
   selected,
   agent,
+  detailed,
+  me,
+  now,
+  reviewers,
+  onAskReview,
   onSelect,
 }: {
   item: TriagedPull;
   deps: Deps | undefined;
   agent: AgentState | undefined;
+  detailed: boolean;
+  me: string;
+  now: number;
+  /** Who "Pedir review" would ask; null when the card offers no such button. */
+  reviewers: string[] | null;
+  onAskReview: AskReview | undefined;
   /** Lit while a linked PR is hovered: its role in that dependency. */
   linked: Role | undefined;
   /** Another org has a repo with this name, so the owner tells them apart. */
@@ -223,6 +340,7 @@ function Row({
   const waitsOn = rail ? [] : open(deps?.blockedBy ?? []);
   const blocks = rail ? [] : open(deps?.blocks ?? []);
   const repoName = showOrg && !rail ? pr.repo : (pr.repo.split("/")[1] ?? pr.repo);
+  const ask = reviewers !== null && onAskReview !== undefined;
   return (
     <li style={{ viewTransitionName: transitionName("pr", pr.id) }}>
       <button
@@ -250,8 +368,9 @@ function Row({
             <Flags item={item} agent={agent} />
           </span>
         )}
+        {detailed && !rail && <Telemetry pr={pr} me={me} now={now} />}
       </button>
-      {(waitsOn.length > 0 || blocks.length > 0) && (
+      {(waitsOn.length > 0 || blocks.length > 0 || ask) && (
         <span className="row-deps">
           {waitsOn.length > 0 && (
             <DepChip verb="espera" kind="blocks" prs={waitsOn} onSelect={onSelect} onLinkHover={onLinkHover} />
@@ -259,6 +378,7 @@ function Row({
           {blocks.length > 0 && (
             <DepChip verb="trava" kind="waits" prs={blocks} onSelect={onSelect} onLinkHover={onLinkHover} />
           )}
+          {ask && <AskReviewButton pr={pr} logins={reviewers} onAsk={onAskReview} />}
         </span>
       )}
     </li>
@@ -443,6 +563,9 @@ export function Board({
   selectedId,
   rail,
   agents = NO_AGENTS,
+  detailed = false,
+  me = "",
+  onAskReview,
   onSelect,
 }: {
   groups: Record<Column, TriagedPull[]>;
@@ -452,6 +575,11 @@ export function Board({
   rail: boolean;
   /** Agent state per PR id, for the cards that have one open. */
   agents?: ReadonlyMap<string, AgentState>;
+  /** Cards show their track, reviewers and size. */
+  detailed?: boolean;
+  me?: string;
+  /** Offers "Pedir review" on my PRs nobody was asked to review. */
+  onAskReview?: AskReview;
   onSelect: (id: string) => void;
 }): ReactElement {
   // Rows lit by hovering a dependency elsewhere on the board.
@@ -463,6 +591,13 @@ export function Board({
   const grabbedHead = useRef(false);
   // The org only shows when two orgs have a repo with the same name; otherwise it is noise on every card.
   const ambiguous = repoNameClashes(COLUMNS.flatMap((c): string[] => groups[c].map((t): string => t.pr.repo)));
+  const allPulls = COLUMNS.flatMap((c): PullRequest[] => groups[c].map((t): PullRequest => t.pr));
+  const now = Date.now();
+  const reviewersFor = ({ pr, triage }: TriagedPull): string[] | null => {
+    if (rail || onAskReview === undefined || triage.column !== "waiting" || !needsReviewers(pr)) return null;
+    const logins = usualReviewers(allPulls, pr.repo, pr.author ?? "");
+    return logins.length > 0 || pr.isDraft ? logins : null;
+  };
   const layoutRef = useRef(layout);
   layoutRef.current = layout;
 
@@ -529,6 +664,11 @@ export function Board({
                 rail={rail}
                 selected={item.pr.id === selectedId}
                 agent={agents.get(item.pr.id)}
+                detailed={detailed}
+                me={me}
+                now={now}
+                reviewers={reviewersFor(item)}
+                onAskReview={onAskReview}
                 onSelect={onSelect}
               />
             ),

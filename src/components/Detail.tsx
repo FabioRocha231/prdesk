@@ -22,7 +22,7 @@ import {
   XCircle,
 } from "lucide-react";
 import type { ReactElement } from "react";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 
 import { type AiRunner, IMPROVE_PROMPT, stripFence } from "../lib/ai";
 import { type Agent, type Config, contextPrompt } from "../lib/config";
@@ -40,17 +40,19 @@ import {
   merge,
   requestReviewers,
   requestReviews,
+  resolveThread,
   setAssignees,
   setLabels,
   updateBranch,
 } from "../lib/github";
-import { rerunFailedJobs, saveCiLog } from "../lib/ipc";
+import { errorMessage, rerunFailedJobs, saveCiLog } from "../lib/ipc";
 import {
   COLUMN_LABEL,
   type DraftComment,
   type PrFile,
   type PullDetail,
   type PullRequest,
+  type Thread,
   type TriagedPull,
 } from "../lib/model";
 import { type NextStep, nextStep } from "../lib/nextStep";
@@ -323,6 +325,8 @@ function ActionBar({
   onShowFiles,
   onSnooze,
   onChanged,
+  approved,
+  onApproved,
   extra,
 }: {
   config: Config;
@@ -340,6 +344,9 @@ function ActionBar({
   onShowFiles: () => void;
   onSnooze: (choice: SnoozeChoice) => void;
   onChanged: () => void;
+  /** I approved the PR, on GitHub or a moment ago in this view. */
+  approved: boolean;
+  onApproved: () => void;
   /** Items the caller adds to the menu, such as switching agents. */
   extra: MenuItem[];
 }): ReactElement {
@@ -354,7 +361,6 @@ function ActionBar({
   const runs = detail === null ? [] : failedRunIds(detail.checks);
   const failing = detail?.checks.filter((c): boolean => c.state === "failure") ?? [];
   const waiting = detail?.threads.filter((t): boolean => waitsOnMe(t, me, mine) && !isBotThread(t)) ?? [];
-  const iApproved = pr.reviews.some((r): boolean => r.author === me && r.state === "APPROVED");
   const mergeReady = mine && pr.reviewDecision === "APPROVED" && !pr.isDraft && detail?.mergeable === "MERGEABLE";
   const mergeLabel = MERGE_LABEL[detail?.mergeMethod ?? ""] ?? detail?.mergeMethod ?? "";
   // Changes were requested, I pushed after them, and the reviewer has not been asked to look again.
@@ -493,7 +499,7 @@ function ActionBar({
     behind: detail?.mergeState === "BEHIND",
     blocked,
     drafts,
-    approved: iApproved,
+    approved,
     onFilesTab,
     rereview: rereview && (detail?.reviewerIds.length ?? 0) > 0,
     stale,
@@ -543,12 +549,16 @@ function ActionBar({
           act("auto-merge", async (): Promise<void> => await enableAutoMerge(config, pr.id, detail.mergeMethod)),
       });
     if (detail.mergeState === "BEHIND") add("pr", actions["update-branch"]);
-    if (!mine && !iApproved)
+    if (!mine && !approved)
       add("pr", {
         key: "approve",
         label: "Aprovar sem comentários",
         icon: <Check size={15} strokeWidth={2} aria-hidden />,
-        run: (): void => act("approve", async (): Promise<void> => await approve(config, pr.id)),
+        run: (): void =>
+          act("approve", async (): Promise<void> => {
+            await approve(config, pr.id);
+            onApproved();
+          }),
       });
     if (mine && pr.isDraft) add("pr", actions.ready);
     if (mine && !pr.isDraft)
@@ -894,7 +904,37 @@ export function Detail({
   const [tab, setTab] = useState<Tab>(prIsMine ? "threads" : "files");
   const [editingTitle, setEditingTitle] = useState(false);
   const agent = agents.find((a): boolean => a.id === agentId) ?? agents[0];
-  const detail = state.status === "ready" ? state.detail : null;
+  // What I resolve or approve here shows at once; the refetch onChanged starts confirms it a few seconds later.
+  const [resolvedHere, setResolvedHere] = useState<ReadonlySet<string>>(new Set());
+  const [resolveError, setResolveError] = useState<string | null>(null);
+  const [approvedHere, setApprovedHere] = useState(false);
+  const loaded = state.status === "ready" ? state.detail : null;
+  const detail = useMemo(
+    (): PullDetail | null =>
+      loaded === null || resolvedHere.size === 0
+        ? loaded
+        : {
+            ...loaded,
+            threads: loaded.threads.map((t): Thread => (resolvedHere.has(t.id) ? { ...t, isResolved: true } : t)),
+          },
+    [loaded, resolvedHere],
+  );
+  const approved = approvedHere || pr.reviews.some((r): boolean => r.author === me && r.state === "APPROVED");
+  const resolve = async (thread: Thread): Promise<void> => {
+    setResolveError(null);
+    setResolvedHere((s): ReadonlySet<string> => new Set(s).add(thread.id));
+    try {
+      await resolveThread(config, thread.id);
+      onChanged();
+    } catch (e) {
+      setResolvedHere((s): ReadonlySet<string> => {
+        const next = new Set(s);
+        next.delete(thread.id);
+        return next;
+      });
+      setResolveError(`Não deu para resolver a conversa em ${thread.path}: ${errorMessage(e)}`);
+    }
+  };
   const openThreads = detail?.threads.filter((t): boolean => !t.isResolved) ?? [];
   const waitingIds = openThreads.filter((t): boolean => waitsOnMe(t, me, prIsMine)).map((t): string => t.id);
   const failing = detail?.checks.filter((c): boolean => c.state === "failure").length ?? 0;
@@ -990,6 +1030,8 @@ export function Detail({
           {detail?.autoMerge === true && <span className="dhead-automerge">auto-merge ligado</span>}
           <div className="dhead-actions">
             <ActionBar
+              approved={approved}
+              onApproved={(): void => setApprovedHere(true)}
               config={config}
               item={item}
               detail={detail}
@@ -1065,6 +1107,8 @@ export function Detail({
             ai={aiState}
             agentName={ai?.agentName ?? agent?.name ?? "agente"}
             canRunAi={ai !== null}
+            approved={approved}
+            onApproved={(): void => setApprovedHere(true)}
             onDrafts={onDrafts}
             onAnalyze={onAnalyze}
             onChanged={onChanged}
@@ -1078,6 +1122,8 @@ export function Detail({
             me={me}
             agentBlocked={agentBlocked}
             draftReply={draftReply}
+            resolveError={resolveError}
+            onResolve={(t): void => void resolve(t)}
             onAgent={onOpenAgent}
             onChanged={onChanged}
           />

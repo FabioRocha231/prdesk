@@ -334,6 +334,15 @@ export function Settings({
                       onChange={(e): void => updateAgent(a.id, { headless: e.target.value })}
                     />
                   </label>
+                  <label className="agent-cmd">
+                    <span>Usar em</span>
+                    <input
+                      className="input"
+                      placeholder="minha-org, fulano/projeto"
+                      value={a.repos.join(", ")}
+                      onChange={(e): void => updateAgent(a.id, { repos: e.target.value.split(/[,\s]+/) })}
+                    />
+                  </label>
                 </div>
               ),
             )}
@@ -344,7 +353,10 @@ export function Settings({
                 onClick={(): void =>
                   setDraft({
                     ...draft,
-                    agents: [...draft.agents, { id: newAgentId(), name: "", command: "{prompt}", headless: "" }],
+                    agents: [
+                      ...draft.agents,
+                      { id: newAgentId(), name: "", command: "{prompt}", headless: "", repos: [] },
+                    ],
                   })
                 }
               >
@@ -372,6 +384,11 @@ export function Settings({
               Os comandos rodam no seu shell, dentro do worktree da PR, e {"{prompt}"} vira as instruções para o agente.
               A versão sem terminal imprime a resposta e sai; a IA do app usa ela para analisar PRs e rascunhar
               respostas e descrições.
+            </p>
+            <p className="hint">
+              Duas contas do Claude? Crie um agente para cada uma, com{" "}
+              <code>CLAUDE_CONFIG_DIR=~/.claude-outra claude {"{prompt}"}</code>, e diga em quais orgs ou repos ele é
+              usado. Fora dessas listas vale o padrão.
             </p>
             {badAgents.length > 0 && (
               <p className="hint error">Todo agente precisa de nome e de {"{prompt}"} no comando.</p>

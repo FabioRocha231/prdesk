@@ -18,12 +18,13 @@ import { applySuggestion, fromBase64, parseSuggestion, toBase64 } from "./sugges
 const PR_FIELDS = `
   ... on PullRequest {
     id number title url body isDraft createdAt updatedAt headRefName baseRefName isCrossRepository reviewDecision
+    additions deletions changedFiles
     mergeStateStatus
     repository { nameWithOwner url }
     author { login }
     commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
     reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-    latestReviews(first: 20) { nodes { author { login } state submittedAt } }
+    latestReviews(first: 20) { nodes { author { __typename login } state submittedAt } }
     reviewThreads(first: 30) {
       nodes {
         isResolved
@@ -93,12 +94,15 @@ interface RawPull {
   mergeable: string;
   mergeStateStatus: string;
   isCrossRepository: boolean;
+  additions?: number;
+  deletions?: number;
+  changedFiles?: number;
   reviewDecision: ReviewDecision | null;
   repository: { nameWithOwner: string; url: string };
   author: Login | null;
   commits: { nodes: { commit: { committedDate: string; statusCheckRollup: { state: CiState } | null } }[] };
   reviewRequests: { nodes: { requestedReviewer: Partial<Login> | null }[] };
-  latestReviews: { nodes: { author: Login | null; state: string; submittedAt: string }[] };
+  latestReviews: { nodes: { author: (Login & { __typename: string }) | null; state: string; submittedAt: string }[] };
   reviewThreads: {
     nodes: {
       isResolved: boolean;
@@ -148,6 +152,9 @@ function toPull(raw: RawPull & { id: string }): PullRequest {
     headRef: raw.headRefName,
     baseRef: raw.baseRefName,
     isCrossRepository: raw.isCrossRepository,
+    ...(raw.additions === undefined
+      ? {}
+      : { size: { additions: raw.additions, deletions: raw.deletions ?? 0, files: raw.changedFiles ?? 0 } }),
     branch: branchState(raw.mergeable, raw.mergeStateStatus),
     dependsOn: parseDependencies(raw.body, raw.repository.nameWithOwner),
     reviewDecision: raw.reviewDecision,
@@ -157,7 +164,16 @@ function toPull(raw: RawPull & { id: string }): PullRequest {
       r.requestedReviewer?.login === undefined ? [] : [r.requestedReviewer.login],
     ),
     reviews: raw.latestReviews.nodes.flatMap((r) =>
-      r.author === null ? [] : [{ author: r.author.login, state: r.state, submittedAt: r.submittedAt }],
+      r.author === null
+        ? []
+        : [
+            {
+              author: r.author.login,
+              state: r.state,
+              submittedAt: r.submittedAt,
+              ...(r.author.__typename === "Bot" ? { isBot: true } : {}),
+            },
+          ],
     ),
     threads: raw.reviewThreads.nodes.map(toThread),
     lastComment: human?.author == null ? null : { author: human.author.login, at: human.createdAt },

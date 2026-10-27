@@ -16,12 +16,12 @@ const AGENT_FILES: [&str; 2] = ["context.md", "plan.md"];
 /// The user's shell, as a login + interactive shell so PATH and aliases match their terminal.
 fn shell(command: &str) -> Command {
     if cfg!(windows) {
-        let mut cmd = Command::new("powershell.exe");
+        let mut cmd = Command::from(crate::command("powershell.exe"));
         cmd.args(["-NoLogo", "-Command", command]);
         cmd
     } else {
         let sh = std::env::var("SHELL").unwrap_or_else(|_| "/bin/sh".into());
-        let mut cmd = Command::new(sh);
+        let mut cmd = Command::from(crate::command(&sh));
         cmd.args(["-l", "-i", "-c", command]);
         cmd
     }

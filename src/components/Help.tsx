@@ -62,6 +62,7 @@ const KEYS: [string, string][] = [
   ["P", "nova PR"],
   ["T", "árvore de branches"],
   ["M", "missões"],
+  ["D", "cards detalhados"],
   ["1–9 / 0", "filtrar por repositório / todos"],
   ["R", "atualizar"],
   [",", "ajustes"],

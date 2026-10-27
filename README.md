@@ -13,16 +13,17 @@ The UI is in Brazilian Portuguese for now (*Sua vez* = your turn).
 ## What it does
 
 - **One board, four columns.** *Sua vez* (your turn), *Review pedido* (review requested), *Aguardando* (waiting on others) and *Outras* (everything else in your scopes, folded to a strip). Columns can be reordered, resized and folded.
-- **Proof next to every status.** Each card shows who acted last and when, plus flags for conflicts, failing CI, drafts and approvals.
+- **Proof next to every status.** Each card shows who acted last and when, plus flags for conflicts, failing CI, drafts and approvals. Press `d` (*Detalhes*) for the detailed cards: a track of the PR's life from opening to now (last commit, each review, open conversations, the idle stretch dashed), who is reviewing and where they stand, and the PR's size.
 - **The next step, one click away.** Inside a PR, one highlighted button says what to do now (review the files, resolve everything with the agent, merge, update the branch); the rest lives in *Mais*.
 - **Review without leaving the app.** The full diff with line comments and "viewed" marks, review threads with their diff hunk, replies and resolve, the conversation, CI checks with re-run, and the PR's branch tree.
 - **Open in your agent.** Pick Claude Code, Codex or OpenCode, or add your own, and press `c`. prdesk clones the repo once into `~/PRDesk`, creates a worktree for the PR's branch, and starts the agent in an embedded terminal with the context already in the prompt. The card shows whether the agent is working or waiting on you, and a notification tells you when it goes quiet.
 - **AI on the side.** Analyze a PR (summary, risks, draft comments), draft replies, rewrite descriptions, or describe a task and get a new branch, the agent's work and a written PR.
 - **Less to keep in your head.** *Novidades* (GitHub notifications), *Encadeadas* (PRs that declare "Depends on org/repo#123", in merge order), snooze until tomorrow, Monday or the next change, a daily summary to paste, auto-merge once CI passes, and a tray icon with your my-turn count.
 - **What happens outside the PRs.** Branches you pushed in the last 14 days without a PR show above the board and open one in a click; a red default branch is flagged so a failing CI elsewhere makes sense; *Issues* lists what is assigned to you, and starting one hands it to the agent with a PR that closes it. The daily summary says where each merged PR is deployed.
-- **Fewer trips to GitHub.** Commit a reviewer's suggestion from its thread, re-request review once you pushed the changes, nudge reviewers when a PR sits for days, filter the board by org or repo, and edit labels and assignees or close a PR from *Mais*.
+- **Fewer trips to GitHub.** Commit a reviewer's suggestion from its thread, re-request review once you pushed the changes, nudge reviewers when a PR sits for days, filter the board by org or repo, ask the people who usually review in a repo straight from a card in *Aguardando* (a draft is marked ready first), and edit labels and assignees or close a PR from *Mais*.
 - **Missions across repos.** Describe a change that spans several repos: prdesk prepares a worktree per repo, a headless agent writes `plan.md` with the contract between them, you review it, and one agent per repo starts in parallel. The plan is a plain file under `~/PRDesk/missions/`. See [the design](docs/design/missions.md).
 - **Housekeeping.** Settings finds worktrees of closed PRs and removes the ones with nothing unsaved in them.
+- **Updates itself.** When a new release is out, a button in the header downloads it, installs it and restarts prdesk. Updates are signed; the app refuses one that was not.
 
 ### How "whose turn" is decided
 
@@ -61,6 +62,8 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 3. Add the orgs (`acme`) and repos (`acme/api`) you want to follow. PRs that involve you appear even outside these scopes.
 
 The agent commands are templates: `{prompt}` is replaced by prdesk's instructions. For example, `claude {prompt}` or `opencode --prompt {prompt}`. They run in your login shell, so whatever works in your terminal works here.
+
+Each agent can list the orgs (`acme`) or repos (`acme/api`) it is used for; everywhere else the default agent runs. That is how you keep one Claude account per client: add an agent with `CLAUDE_CONFIG_DIR=~/.claude-client claude {prompt}` (or a shell alias that does the same) and list that client's org. Picking another agent inside a PR overrides it for that repo until prdesk restarts.
 
 ### Opening an unsigned build
 

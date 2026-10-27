@@ -24,8 +24,17 @@ function fileId(path: string): string {
   return `file-${path.replace(/[^A-Za-z0-9_-]/g, "-")}`;
 }
 
+/**
+ * Files off screen are not rendered (content-visibility), so their heights are guesses until seen: a smooth scroll
+ * aims at the guess and lands short as files render on the way. Jump instead, then correct once the files around the
+ * target have their real size.
+ */
 function scrollToFile(path: string): void {
-  document.getElementById(fileId(path))?.scrollIntoView({ behavior: "smooth", block: "start" });
+  const jump = (): void => document.getElementById(fileId(path))?.scrollIntoView({ block: "start" });
+  jump();
+  window.requestAnimationFrame((): void => {
+    window.requestAnimationFrame(jump);
+  });
 }
 
 interface Target {
@@ -327,6 +336,8 @@ export function ReviewTab({
   ai,
   agentName,
   canRunAi,
+  approved,
+  onApproved,
   onDrafts,
   onAnalyze,
   onChanged,
@@ -338,6 +349,9 @@ export function ReviewTab({
   ai: AiState;
   agentName: string;
   canRunAi: boolean;
+  /** I already approved: approving again would only add a duplicate review. */
+  approved: boolean;
+  onApproved: () => void;
   onDrafts: (next: DraftComment[]) => void;
   onAnalyze: (files: PrFile[]) => void;
   onChanged: () => void;
@@ -410,6 +424,7 @@ export function ReviewTab({
     if (ok) {
       onDrafts([]);
       setBody("");
+      if (event === "APPROVE") onApproved();
       onChanged();
     }
   };
@@ -559,14 +574,16 @@ export function ReviewTab({
               >
                 {action.pending === "submit-REQUEST_CHANGES" ? "Enviando…" : "Pedir mudanças"}
               </button>
-              <button
-                type="button"
-                className="button primary small"
-                disabled={action.pending !== null}
-                onClick={(): void => void submit("APPROVE")}
-              >
-                {action.pending === "submit-APPROVE" ? "Enviando…" : "Aprovar"}
-              </button>
+              {!approved && (
+                <button
+                  type="button"
+                  className="button primary small"
+                  disabled={action.pending !== null}
+                  onClick={(): void => void submit("APPROVE")}
+                >
+                  {action.pending === "submit-APPROVE" ? "Enviando…" : "Aprovar"}
+                </button>
+              )}
             </>
           )}
         </div>

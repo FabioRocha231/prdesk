@@ -1,4 +1,3 @@
-use std::process::Command;
 use std::sync::Mutex;
 
 use keyring::Entry;
@@ -41,7 +40,7 @@ fn keychain_token() -> Result<Option<String>, String> {
 
 fn gh_token() -> Option<String> {
     GH_CANDIDATES.iter().find_map(|bin| {
-        let out = Command::new(bin).args(["auth", "token"]).output().ok()?;
+        let out = crate::command(bin).args(["auth", "token"]).output().ok()?;
         let token = String::from_utf8(out.stdout).ok()?.trim().to_owned();
         (out.status.success() && !token.is_empty()).then_some(token)
     })

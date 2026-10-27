@@ -22,6 +22,20 @@ fn summon(app: &AppHandle) {
     }
 }
 
+/// A child process that opens no console window on Windows. A GUI app's console children each get a window of
+/// their own otherwise, so every git or gh call would flash one.
+pub(crate) fn command(program: &str) -> std::process::Command {
+    #[allow(unused_mut)]
+    let mut cmd = std::process::Command::new(program);
+    #[cfg(windows)]
+    {
+        use std::os::windows::process::CommandExt;
+        const CREATE_NO_WINDOW: u32 = 0x0800_0000;
+        cmd.creation_flags(CREATE_NO_WINDOW);
+    }
+    cmd
+}
+
 const TRAY_ID: &str = "main";
 
 /// Tray icon: click (or "Abrir") brings the window back; the title and tooltip carry the my-turn count.
@@ -89,6 +103,8 @@ pub fn run() {
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_store::Builder::default().build())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_process::init())
         .setup(|app| Ok(tray(app.handle())?))
         .manage(auth::TokenCache::default())
         .manage(pty::Sessions::default())

@@ -1,6 +1,6 @@
 [package]
 name = "prdesk"
-version = "0.2.0"
+version = "0.2.1"
 description = "Every open PR, sorted by whose turn it is"
 authors = ["prdesk contributors"]
 edition = "2024"
@@ -43,3 +43,5 @@ strip = true
 
 [target.'cfg(not(any(target_os = "android", target_os = "ios")))'.dependencies]
 tauri-plugin-global-shortcut = "2"
+tauri-plugin-process = "2"
+tauri-plugin-updater = "2"

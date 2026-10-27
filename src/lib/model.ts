@@ -28,6 +28,8 @@ export interface Review {
   author: string;
   state: string;
   submittedAt: string;
+  /** CodeRabbit, Copilot and friends: they review on their own, nobody asks them. */
+  isBot?: boolean;
 }
 
 /** Just enough of a review thread to decide whose turn it is. */
@@ -71,6 +73,8 @@ export interface PullRequest {
   branch: "ok" | "behind" | "conflicts";
   /** PRs the description says must merge first ("Depende de org/repo#12"). */
   dependsOn: PrRef[];
+  /** Lines added and removed, and files touched. */
+  size?: { additions: number; deletions: number; files: number };
   /** Set only for PRs opened outside the board (from the feed) that are no longer open. */
   closed?: "MERGED" | "CLOSED";
 }

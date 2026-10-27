@@ -813,6 +813,184 @@ kbd {
   color: var(--amber);
 }
 
+/*
+ * Detailed cards. The track is a flight recorder: opened at the left edge, now at the right, one mark per event.
+ * Shape carries the meaning as much as colour (tick = commit, dot = approved, diamond = changes requested, ring =
+ * comment or open conversation), and the stretch since the last event is dashed in the column's hue: how long the
+ * ball has sat where it is.
+ */
+.telemetry {
+  display: grid;
+  gap: 8px;
+  padding-top: 4px;
+}
+
+.track {
+  position: relative;
+  height: 12px;
+  margin: 0 4px;
+  background: linear-gradient(var(--line-hi), var(--line-hi)) 0 50% / 100% 1px no-repeat;
+}
+.track::before,
+.track::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  width: 1px;
+  height: 8px;
+}
+/* Opened. */
+.track::before {
+  left: 0;
+  background: var(--text-3);
+}
+/* Now, in whose-turn colour. */
+.track::after {
+  right: 0;
+  width: 2px;
+  background: var(--hue);
+}
+
+.track-idle {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  border-top: 1px dashed color-mix(in srgb, var(--hue) 70%, transparent);
+  translate: 0 -0.5px;
+}
+
+.mark {
+  position: absolute;
+  top: 50%;
+  width: 7px;
+  height: 7px;
+  translate: -50% -50%;
+  border-radius: 50%;
+}
+.mark-commit {
+  width: 2px;
+  height: 10px;
+  border-radius: 0;
+  background: var(--text-2);
+}
+.mark-approved {
+  background: var(--good);
+}
+.mark-changes {
+  width: 7px;
+  height: 7px;
+  border-radius: 0;
+  rotate: 45deg;
+  background: var(--hot);
+}
+.mark-commented,
+.mark-comment {
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--text-2);
+  background: var(--void);
+}
+.mark-thread {
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--amber);
+  background: var(--void);
+}
+
+.crew-line {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 10px;
+  min-width: 0;
+  font-size: 0.75rem;
+  color: var(--text-2);
+}
+
+.crew {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+.crew::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  flex: none;
+}
+.crew-approved::before {
+  background: var(--good);
+}
+.crew-changes::before {
+  border-radius: 0;
+  rotate: 45deg;
+  background: var(--hot);
+}
+.crew-commented::before {
+  border: 1.5px solid var(--text-2);
+}
+.crew-asked {
+  color: var(--text-3);
+}
+.crew-asked::before {
+  border: 1.5px dashed var(--text-3);
+}
+.crew-none {
+  color: var(--text-3);
+}
+
+.facts {
+  display: inline-flex;
+  align-items: center;
+  gap: 10px;
+  margin-left: auto;
+  color: var(--text-3);
+}
+.fact {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 500 0.75rem / 1 var(--hud);
+  font-variant-numeric: tabular-nums;
+}
+.fact b {
+  font-weight: 500;
+}
+.fact-add {
+  color: var(--good);
+}
+.fact-del {
+  color: var(--hot);
+}
+
+.ask-review {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent);
+  color: var(--cyan);
+  font-size: 0.75rem;
+  line-height: 1.5;
+  transition:
+    background-color 160ms ease-out,
+    border-color 160ms ease-out;
+}
+.ask-review:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--cyan) 12%, transparent);
+  border-color: var(--cyan);
+}
+.ask-review:disabled {
+  opacity: 0.6;
+}
+.ask-error {
+  flex-basis: 100%;
+  color: var(--hot);
+  font-size: 0.75rem;
+  white-space: normal;
+}
+
 /* Dependency chain in the PR header: what merges first, this PR, what waits on it. */
 .chain {
   display: flex;
@@ -1237,13 +1415,14 @@ button.chain-node:hover {
 
 .threads-layout {
   display: grid;
-  grid-template-columns: 230px minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr);
   gap: 20px;
   align-items: start;
 }
 
-.threads-layout:has(> .tlist:only-child) {
-  grid-template-columns: minmax(0, 1fr);
+/* A class set by React, not :has(): WebKit keeps a stale :has() match when the index is removed. */
+.threads-layout.with-index {
+  grid-template-columns: 230px minmax(0, 1fr);
 }
 
 .tindex {
@@ -3277,6 +3456,13 @@ textarea.input {
   white-space: nowrap;
 }
 
+/* Ellipsis needs a block of its own: on the flex button itself the text would just be clipped. */
+.band-sync-text {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
 .band-sync:hover:not(:disabled) {
   color: var(--cyan);
 }
@@ -3354,6 +3540,8 @@ textarea.input {
   color: var(--void);
   font: 600 0.8125rem / 1 var(--font);
   letter-spacing: 0.005em;
+  white-space: nowrap;
+  flex: none;
   clip-path: polygon(0 0, calc(100% - var(--cut)) 0, 100% var(--cut), 100% 100%, 0 100%);
   transition: filter 140ms linear;
 }
@@ -3371,6 +3559,28 @@ textarea.input {
   border-color: rgba(4, 6, 11, 0.4);
   color: var(--void);
   opacity: 0.7;
+}
+
+/* A new release is out: outlined, so it sits beside "Nova PR" without competing with it. */
+.update-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  height: 34px;
+  padding: 0 12px;
+  border: 1px solid color-mix(in srgb, var(--good) 55%, transparent);
+  color: var(--good);
+  font: 500 0.8125rem / 1 var(--font);
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+  flex: none;
+  transition: background-color 140ms linear;
+}
+.update-button:hover:not(:disabled) {
+  background: color-mix(in srgb, var(--good) 12%, transparent);
+}
+.update-button:disabled {
+  cursor: progress;
 }
 
 .action-bar {

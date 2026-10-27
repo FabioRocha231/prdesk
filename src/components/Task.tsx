@@ -154,6 +154,7 @@ export function TaskView({
   config,
   ai,
   agentBusy,
+  agentName,
   onOpenAgent,
   onCreated,
 }: {
@@ -161,6 +162,7 @@ export function TaskView({
   config: Config;
   ai: PrAi | null;
   agentBusy: boolean;
+  agentName: string;
   onOpenAgent: () => void;
   onCreated: (number: number) => void;
 }): ReactElement {
@@ -233,7 +235,7 @@ export function TaskView({
             </button>
             <div className="agent-pick">
               <button type="button" onClick={onOpenAgent} disabled={agentBusy || cwd === null}>
-                <Play size={15} strokeWidth={2.5} aria-hidden /> Abrir o agente
+                <Play size={15} strokeWidth={2.5} aria-hidden /> Abrir no {agentName}
               </button>
             </div>
           </div>

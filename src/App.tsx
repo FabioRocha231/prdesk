@@ -1,5 +1,6 @@
 import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
+  Activity as ActivityIcon,
   ArrowLeft,
   Bell,
   CalendarCheck,
@@ -37,6 +38,7 @@ import { Settings } from "./components/Settings";
 import { branchFor, NewTaskDialog, type Task, type TaskSeed, TaskView } from "./components/Task";
 import { Terminal } from "./components/Terminal";
 import { htmlToText, type ReplyDrafter } from "./components/Threads";
+import { UpdateButton } from "./components/UpdateButton";
 import {
   DESCRIBE_PROMPT,
   diffContext,
@@ -50,6 +52,7 @@ import {
 import {
   type Agent,
   agentCommand,
+  agentFor,
   agentPrompt,
   type Config,
   contextPrompt,
@@ -67,9 +70,11 @@ import {
   fetchPulls,
   fetchRadar,
   type Issue,
+  markReady,
   type PullCache,
   pullsFromCache,
   type Radar,
+  requestReviewers,
   type StrayBranch,
 } from "./lib/github";
 import {
@@ -192,7 +197,8 @@ export function App(): ReactElement {
   const [cursor, setCursor] = useState<string | null>(null);
   const [details, setDetails] = useState<Record<string, DetailState>>({});
   const [sessions, setSessions] = useState<Record<string, Session>>({});
-  const [agentId, setAgentId] = useState("");
+  // A hand-picked agent per repo, for this run of the app; otherwise agentFor routes by the agent's repos.
+  const [agentPicks, setAgentPicks] = useState<Record<string, string>>({});
   const [paletteOpen, setPaletteOpen] = useState(false);
   const [feed, setFeed] = useState<Activity[]>([]);
   // PRs opened from the feed that are not on the board (closed, merged, or outside the scopes).
@@ -206,6 +212,7 @@ export function App(): ReactElement {
   const [snoozes, setSnoozes] = useState<Snoozes>({});
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [repoFilter, setRepoFilter] = useState<string[]>([]);
+  const [detailed, setDetailed] = useState(false);
   // Terminal dock height in px once the user resized it; null keeps the default share of the window.
   const [dockHeight, setDockHeight] = useState<number | null>(null);
   const [dockDragging, setDockDragging] = useState(false);
@@ -244,10 +251,10 @@ export function App(): ReactElement {
     void (async (): Promise<void> => {
       const loaded = await loadConfig();
       setConfig(loaded);
-      setAgentId(loaded.defaultAgentId);
       setSnoozes(await loadValue<Snoozes>("snoozes", {}));
       setTasks(await loadValue<Record<string, Task>>("tasks", {}));
       setRepoFilter(await loadValue<string[]>("repoFilter", []));
+      setDetailed(await loadValue<boolean>("boardDetailed", false));
       setDockHeight(await loadValue<number | null>("dockHeight", null));
       // Last sync's board shows at once; the first refresh then only fetches what changed while the app was closed.
       try {
@@ -396,6 +403,20 @@ export function App(): ReactElement {
     setRepoFilter(next);
     void saveValue("repoFilter", next);
   };
+  const toggleDetailed = (): void => {
+    setDetailed((on) => {
+      void saveValue("boardDetailed", !on);
+      return !on;
+    });
+  };
+  /** From an "Aguardando" card: a draft becomes ready, then the usual reviewers are asked. */
+  const askReview = async (pr: PullRequest, logins: string[]): Promise<void> => {
+    if (config === null) return;
+    if (pr.isDraft) await markReady(config, pr.id);
+    if (logins.length > 0) await requestReviewers(config, pr, logins);
+    forceRefetch.current.add(pr.id);
+    void refresh();
+  };
   const groups = useMemo(() => board(visible, me ?? ""), [visible, me]);
   const deps = useMemo(
     () => dependencyIndex([...(pulls ?? []), ...Object.values(extra).filter((p): boolean => p.closed === undefined)]),
@@ -436,8 +457,8 @@ export function App(): ReactElement {
     if (selectedId !== null) void loadDetail(selectedId);
   }, [selectedId, loadDetail]);
 
-  const currentAgent = (): Agent | undefined =>
-    config?.agents.find((a): boolean => a.id === agentId) ?? config?.agents[0];
+  const agentForRepo = (repo: string): Agent | undefined =>
+    config === null ? undefined : agentFor(config, repo, agentPicks[repo]);
 
   /** Clones once and returns the PR's worktree; cached so AI runs and the terminal share it. */
   const ensureWorktree = useCallback(
@@ -463,11 +484,17 @@ export function App(): ReactElement {
 
   /** Starts the interactive agent in `cwd` under `key` (a PR id or a task id). */
   const spawnAgent = useCallback(
-    async (key: string, cwdFor: () => Promise<string>, prompt: string, context?: string): Promise<void> => {
+    async (
+      key: string,
+      repo: string,
+      cwdFor: () => Promise<string>,
+      prompt: string,
+      context?: string,
+    ): Promise<void> => {
       if (config === null) return;
       const current = sessions[key];
       if (current?.status === "running" || current?.status === "preparing") return;
-      const agent = config.agents.find((a): boolean => a.id === agentId) ?? config.agents[0];
+      const agent = agentFor(config, repo, agentPicks[repo]);
       if (agent === undefined) return;
       setSessions((s) => ({ ...s, [key]: { status: "preparing", agentName: agent.name } }));
       try {
@@ -479,7 +506,7 @@ export function App(): ReactElement {
         setSessions((s) => ({ ...s, [key]: { status: "error", agentName: agent.name, message: errorMessage(e) } }));
       }
     },
-    [config, sessions, agentId],
+    [config, sessions, agentPicks],
   );
 
   const openAgent = useCallback(
@@ -487,6 +514,7 @@ export function App(): ReactElement {
       if (me === null) return;
       await spawnAgent(
         item.pr.id,
+        item.pr.repo,
         async (): Promise<string> => await ensureWorktree(item.pr),
         prompt ?? agentPrompt(item.pr, me),
         context,
@@ -496,8 +524,8 @@ export function App(): ReactElement {
   );
 
   /** Headless AI bound to a worktree; null when the selected agent has no headless command. */
-  const aiIn = (cwdFor: () => Promise<string>): PrAi | null => {
-    const agent = currentAgent();
+  const aiIn = (repo: string, cwdFor: () => Promise<string>): PrAi | null => {
+    const agent = agentForRepo(repo);
     if (config === null || agent === undefined || agent.headless.trim() === "") return null;
     return {
       agentName: agent.name,
@@ -506,7 +534,7 @@ export function App(): ReactElement {
     };
   };
 
-  const aiFor = (pr: PullRequest): PrAi | null => aiIn(async (): Promise<string> => await ensureWorktree(pr));
+  const aiFor = (pr: PullRequest): PrAi | null => aiIn(pr.repo, async (): Promise<string> => await ensureWorktree(pr));
 
   const analyze = async (item: TriagedPull, files: PrFile[]): Promise<void> => {
     const ai = aiFor(item.pr);
@@ -581,6 +609,7 @@ export function App(): ReactElement {
     const [owner = "", name = ""] = repo.split("/");
     await spawnAgent(
       id,
+      repo,
       async (): Promise<string> => {
         const cwd = await prepareBranch({ repoUrl, owner, repo: name, branch, workspaceDir: config.workspaceDir });
         setTasks((t) => {
@@ -714,7 +743,7 @@ export function App(): ReactElement {
   /** Runs the planning agent over every worktree and writes plan.md; without a headless agent the template stays. */
   const planMission = async (start: Mission): Promise<void> => {
     if (config === null) return;
-    const agent = currentAgent();
+    const agent = agentForRepo(start.parts[0]?.repo ?? "");
     if (agent === undefined || agent.headless.trim() === "") {
       await saveMission({
         ...start,
@@ -819,6 +848,7 @@ export function App(): ReactElement {
         await writeAgentContext(cwd, config.workspaceDir, text, "plan.md");
         await spawnAgent(
           p.taskId,
+          p.repo,
           async (): Promise<string> => cwd,
           contextPrompt(partTask(title, p.repo, prepared.parts.length)),
           partContext(part),
@@ -885,7 +915,7 @@ export function App(): ReactElement {
   /** One headless pass over every part's diff against the contract. */
   const checkMission = async (id: string): Promise<void> => {
     const m = missions.find((x): boolean => x.id === id);
-    const agent = currentAgent();
+    const agent = agentForRepo(m?.parts[0]?.repo ?? "");
     if (config === null || m === undefined || agent === undefined || agent.headless.trim() === "") return;
     setMissionChecks((c) => ({ ...c, [id]: { status: "running" } }));
     try {
@@ -955,7 +985,7 @@ export function App(): ReactElement {
       try {
         let prTitle = title;
         let body = step.body;
-        const ai = aiIn(async (): Promise<string> => cwd);
+        const ai = aiIn(part.repo, async (): Promise<string> => cwd);
         if (ai !== null) {
           try {
             const diff = changes.get(part.repo)?.diff ?? "";
@@ -1077,7 +1107,6 @@ export function App(): ReactElement {
   const saveSettings = async (next: Config): Promise<void> => {
     const saved = await saveConfig(next);
     setConfig(saved);
-    if (!saved.agents.some((a): boolean => a.id === agentId)) setAgentId(saved.defaultAgentId);
     await checkToken();
     setView("board");
   };
@@ -1199,6 +1228,10 @@ export function App(): ReactElement {
       setView(view === "missions" ? "board" : "missions");
       return;
     }
+    if (e.key === "d" && view === "board" && !inDetail) {
+      toggleDetailed();
+      return;
+    }
     if (view !== "board") return;
 
     if (selectedId === null && /^[0-9]$/.test(e.key) && chipRepos.length > 1) {
@@ -1275,6 +1308,7 @@ export function App(): ReactElement {
       const cwd = selectedTask.cwd;
       void spawnAgent(
         selectedTask.id,
+        selectedTask.repo,
         async (): Promise<string> => cwd,
         contextPrompt("Continue the task below in this worktree. Do not commit or push."),
         `# Task\n\n${selectedTask.text}`,
@@ -1361,13 +1395,15 @@ export function App(): ReactElement {
           aria-live="polite"
         >
           <RefreshCw className={sync.loading ? "spin" : ""} size={14} strokeWidth={2} aria-hidden />
-          {sync.loading
-            ? "Sincronizando…"
-            : sync.error !== null
-              ? `Falha ao sincronizar: ${sync.error}`
-              : sync.at !== null
-                ? `Sincronizado às ${clock(sync.at)}`
-                : "Atualizar"}
+          <span className="band-sync-text">
+            {sync.loading
+              ? "Sincronizando…"
+              : sync.error !== null
+                ? `Falha ao sincronizar: ${sync.error}`
+                : sync.at !== null
+                  ? `Sincronizado às ${clock(sync.at)}`
+                  : "Atualizar"}
+          </span>
         </button>
         <div className="band-actions">
           <button
@@ -1409,6 +1445,17 @@ export function App(): ReactElement {
             >
               <Clock size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Adiadas</span>{" "}
               <span className="band-count muted">{snoozedCount}</span>
+            </button>
+          )}
+          {view === "board" && !inDetail && (
+            <button
+              type="button"
+              className="text-button"
+              aria-pressed={detailed}
+              title="Mostrar nos cards a linha do tempo, quem revisa e o tamanho da PR (D)"
+              onClick={toggleDetailed}
+            >
+              <ActivityIcon size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Detalhes</span>
             </button>
           )}
           {chains.length > 0 && (
@@ -1472,6 +1519,7 @@ export function App(): ReactElement {
           >
             <SettingsIcon size={17} strokeWidth={2} aria-hidden />
           </button>
+          <UpdateButton />
           <button
             type="button"
             className="band-primary"
@@ -1579,7 +1627,7 @@ export function App(): ReactElement {
             notes={partNotes}
             checks={missionChecks}
             partStatus={partStatus}
-            canPlan={(currentAgent()?.headless.trim() ?? "") !== ""}
+            canPlan={(agentForRepo("")?.headless.trim() ?? "") !== ""}
             onSelect={setOpenMissionId}
             onNew={(): void => setNewMissionOpen(true)}
             onSavePlan={writePlan}
@@ -1669,6 +1717,9 @@ export function App(): ReactElement {
             selectedId={cursor}
             agents={agentStates}
             rail={false}
+            detailed={detailed}
+            me={me ?? ""}
+            onAskReview={askReview}
             onSelect={navigate}
           />
         )}
@@ -1697,7 +1748,12 @@ export function App(): ReactElement {
               key={selectedTask.id}
               task={selectedTask}
               config={config}
-              ai={selectedTask.cwd === null ? null : aiIn(async (): Promise<string> => selectedTask.cwd ?? "")}
+              ai={
+                selectedTask.cwd === null
+                  ? null
+                  : aiIn(selectedTask.repo, async (): Promise<string> => selectedTask.cwd ?? "")
+              }
+              agentName={agentForRepo(selectedTask.repo)?.name ?? "agente"}
               agentBusy={session?.status === "preparing" || session?.status === "running"}
               onOpenAgent={reopen}
               onCreated={(number): void => void taskOpened(selectedTask, number)}
@@ -1725,7 +1781,7 @@ export function App(): ReactElement {
               config={config}
               state={details[selected.pr.id] ?? { status: "loading" }}
               agents={config.agents}
-              agentId={agentId}
+              agentId={agentForRepo(selected.pr.repo)?.id ?? ""}
               agentBusy={session?.status === "preparing"}
               agentBlocked={session?.status === "running" || session?.status === "preparing"}
               worktree={session?.status === "running" || session?.status === "exited" ? session.cwd : null}
@@ -1737,7 +1793,7 @@ export function App(): ReactElement {
               deps={deps.get(selected.pr.id) ?? NO_DEPS}
               repoPulls={(pulls ?? []).filter((p): boolean => p.repo === selected.pr.repo)}
               onOpenRef={(ref): void => void openRef(ref)}
-              onAgentChange={setAgentId}
+              onAgentChange={(id): void => setAgentPicks((p) => ({ ...p, [selected.pr.repo]: id }))}
               onOpenAgent={(prompt?: string, context?: string): void => void openAgent(selected, prompt, context)}
               onOpenGithub={(): void => void openUrl(selected.pr.url)}
               onDrafts={(next): void => setDrafts((d) => ({ ...d, [selected.pr.id]: next }))}

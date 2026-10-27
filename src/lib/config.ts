@@ -9,6 +9,8 @@ export interface Agent {
   command: string;
   /** Non-interactive variant that prints its answer and exits (AI review, drafted replies). Empty disables it. */
   headless: string;
+  /** Orgs (`acme`) or repos (`acme/api`) this agent is used for, e.g. one Claude account per client. */
+  repos: string[];
 }
 
 export interface Config {
@@ -27,14 +29,21 @@ export const DEFAULT_CONFIG: Config = {
   scopes: [],
   workspaceDir: "",
   agents: [
-    { id: "claude", name: "Claude Code", command: "claude {prompt}", headless: "claude -p {prompt}" },
+    { id: "claude", name: "Claude Code", command: "claude {prompt}", headless: "claude -p {prompt}", repos: [] },
     {
       id: "codex",
       name: "Codex",
       command: "codex {prompt}",
       headless: "codex exec --skip-git-repo-check -s read-only {prompt}",
+      repos: [],
     },
-    { id: "opencode", name: "OpenCode", command: "opencode --prompt {prompt}", headless: "opencode run {prompt}" },
+    {
+      id: "opencode",
+      name: "OpenCode",
+      command: "opencode --prompt {prompt}",
+      headless: "opencode run {prompt}",
+      repos: [],
+    },
   ],
   defaultAgentId: "claude",
   pollSeconds: 60,
@@ -61,6 +70,7 @@ function normalize(stored: Partial<Config> | undefined): Config {
       (a): Agent => ({
         ...a,
         headless: a.headless ?? DEFAULT_CONFIG.agents.find((d): boolean => d.id === a.id)?.headless ?? "",
+        repos: (a.repos ?? []).filter(isValidScope),
       }),
     ),
   };
@@ -123,6 +133,19 @@ export function threadPrompt(
 export function ciPrompt(pr: PullRequest, checkName: string, logPath: string): string {
   return oneLine(
     `The CI check "${checkName}" failed on pull request ${pr.url}. The tail of its log is in ${logPath}. Read it, find the root cause, fix it in this worktree and run the relevant tests locally.`,
+  );
+}
+
+/** The agent for a repo: the one picked by hand, then one listing the repo, then one listing its owner, then the default. */
+export function agentFor(config: Config, repo: string, pickedId?: string): Agent | undefined {
+  const owner = repo.split("/")[0];
+  const byId = (id: string | undefined): Agent | undefined => config.agents.find((a): boolean => a.id === id);
+  return (
+    byId(pickedId) ??
+    config.agents.find((a): boolean => a.repos.includes(repo)) ??
+    config.agents.find((a): boolean => owner !== undefined && a.repos.includes(owner)) ??
+    byId(config.defaultAgentId) ??
+    config.agents[0]
   );
 }
 

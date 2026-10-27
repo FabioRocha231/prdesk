@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentCommand, shellQuote } from "./config";
+import { agentCommand, agentFor, DEFAULT_CONFIG, shellQuote } from "./config";
 
 describe("shellQuote", () => {
   it("keeps hostile comment text inert inside single quotes", () => {
@@ -11,6 +11,25 @@ describe("shellQuote", () => {
   });
 
   it("fills the agent template", () => {
-    expect(agentCommand({ id: "c", name: "C", command: "claude {prompt}", headless: "" }, "go")).toBe("claude 'go'");
+    expect(agentCommand({ id: "c", name: "C", command: "claude {prompt}", headless: "", repos: [] }, "go")).toBe(
+      "claude 'go'",
+    );
+  });
+});
+
+describe("agentFor", () => {
+  const agent = (id: string, repos: string[]) => ({ id, name: id, command: "", headless: "", repos });
+  const config = {
+    ...DEFAULT_CONFIG,
+    agents: [agent("work", []), agent("gg", ["gg"]), agent("gg-api", ["gg/api"])],
+    defaultAgentId: "work",
+  };
+
+  it("prefers a hand pick, then the repo, then its owner, then the default", () => {
+    expect(agentFor(config, "gg/api", "work")?.id).toBe("work");
+    expect(agentFor(config, "gg/api")?.id).toBe("gg-api");
+    expect(agentFor(config, "gg/web")?.id).toBe("gg");
+    expect(agentFor(config, "acme/web")?.id).toBe("work");
+    expect(agentFor(config, "acme/web", "gone")?.id).toBe("work");
   });
 });

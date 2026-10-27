@@ -225,6 +225,7 @@ function ThreadCard({
   canPush,
   agentBlocked,
   draftReply,
+  onResolve,
   onAgent,
   onChanged,
 }: {
@@ -237,6 +238,7 @@ function ThreadCard({
   canPush: boolean;
   agentBlocked: boolean;
   draftReply: ReplyDrafter;
+  onResolve: () => void;
   onAgent: (prompt: string, context?: string) => void;
   onChanged: () => void;
 }): ReactElement {
@@ -251,10 +253,6 @@ function ThreadCard({
   const hidden = allReplies ? 0 : Math.max(0, replies.length - VISIBLE_REPLIES);
   const shown = replies.slice(hidden);
   const codeLines = numberHunk(thread.diffHunk).filter((l): boolean => l.kind !== "meta").length;
-
-  const resolve = async (): Promise<void> => {
-    if (await action.run("resolve", async (): Promise<void> => await resolveThread(config, thread.id))) onChanged();
-  };
 
   const apply = async (): Promise<void> => {
     if (await action.run("apply", async (): Promise<void> => await commitSuggestion(config, pr, thread))) onChanged();
@@ -374,14 +372,9 @@ function ThreadCard({
                 <button type="button" className="link-button" onClick={(): void => setReplying(true)}>
                   <MessageSquareReply size={14} strokeWidth={2} aria-hidden /> Responder
                 </button>
-                <button
-                  type="button"
-                  className="link-button"
-                  disabled={action.pending !== null}
-                  onClick={(): void => void resolve()}
-                >
+                <button type="button" className="link-button" disabled={action.pending !== null} onClick={onResolve}>
                   <Check size={14} strokeWidth={2} aria-hidden />
-                  {action.pending === "resolve" ? "Resolvendo…" : "Resolver"}
+                  Resolver
                 </button>
                 <button
                   type="button"
@@ -444,6 +437,8 @@ export function ThreadsTab({
   me,
   agentBlocked,
   draftReply,
+  resolveError,
+  onResolve,
   onAgent,
   onChanged,
 }: {
@@ -453,6 +448,9 @@ export function ThreadsTab({
   me: string;
   agentBlocked: boolean;
   draftReply: ReplyDrafter;
+  /** The last resolve that GitHub refused; its thread is back in the list. */
+  resolveError: string | null;
+  onResolve: (thread: Thread) => void;
   onAgent: (prompt: string, context?: string) => void;
   onChanged: () => void;
 }): ReactElement {
@@ -493,14 +491,20 @@ export function ThreadsTab({
       canPush={canPush}
       agentBlocked={agentBlocked}
       draftReply={draftReply}
+      onResolve={(): void => onResolve(t)}
       onAgent={onAgent}
       onChanged={onChanged}
     />
   );
   return (
-    <div className="threads-layout">
+    <div className={open.length > 1 ? "threads-layout with-index" : "threads-layout"}>
       {open.length > 1 && <ThreadIndex threads={open} waiting={waiting} />}
       <div className="tlist">
+        {resolveError !== null && (
+          <p className="action-error" role="alert">
+            {resolveError}
+          </p>
+        )}
         {open.length === 0 && <p className="notice">Nenhuma conversa de pessoas em aberto.</p>}
         {open.map(card)}
         {bots.length > 0 && (
