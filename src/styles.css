@@ -825,6 +825,24 @@ kbd {
   padding-top: 4px;
 }
 
+/* Track on the left, "18h com bia" at its end. */
+.track-line {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+}
+.track-label {
+  font: 500 0.75rem / 1 var(--hud);
+  font-variant-numeric: tabular-nums;
+  color: var(--text-3);
+  white-space: nowrap;
+}
+/* Past a working day idle: the one accent the card allows besides its column. */
+.telemetry.is-stale .track-label {
+  color: var(--amber);
+}
+
 .track {
   position: relative;
   height: 12px;
@@ -858,6 +876,9 @@ kbd {
   border-top: 1px dashed color-mix(in srgb, var(--hue) 70%, transparent);
   translate: 0 -0.5px;
 }
+.telemetry.is-stale .track-idle {
+  border-top-color: var(--amber);
+}
 
 .mark {
   position: absolute;
@@ -889,6 +910,12 @@ kbd {
   height: 6px;
   border: 1.5px solid var(--text-2);
   background: var(--void);
+}
+/* Several events drawn as one: a halo says there is more in the tooltip. */
+.mark.is-cluster {
+  box-shadow:
+    0 0 0 2px var(--void),
+    0 0 0 3px var(--text-3);
 }
 .mark-thread {
   width: 6px;
@@ -939,6 +966,18 @@ kbd {
 .crew-none {
   color: var(--text-3);
 }
+.crew-avatar {
+  width: 16px;
+  height: 16px;
+  border-radius: 50%;
+  flex: none;
+}
+.crew-asked .crew-avatar {
+  opacity: 0.6;
+}
+.crew-more {
+  color: var(--text-3);
+}
 
 .facts {
   display: inline-flex;
@@ -956,6 +995,19 @@ kbd {
 }
 .fact b {
   font-weight: 500;
+}
+/* CI still running: quiet, so a card does not read as ready while checks are pending. */
+.fact-ci::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border: 1.5px solid var(--text-3);
+  border-radius: 50%;
+}
+.fact-band {
+  padding: 1px 4px;
+  border: 1px solid var(--line-hi);
+  color: var(--text-2);
 }
 .fact-add {
   color: var(--good);

@@ -1316,6 +1316,13 @@ export function App(): ReactElement {
     }
   };
   const dockOpen = inDetail && session !== undefined;
+  const syncText = sync.loading
+    ? "Sincronizando…"
+    : sync.error !== null
+      ? `Falha ao sincronizar: ${sync.error}`
+      : sync.at !== null
+        ? `Sincronizado às ${clock(sync.at)}`
+        : "Atualizar";
   // Mission parts show under their mission's chip, not one by one.
   const looseTasks = Object.values(tasks).filter((t): boolean => t.mission === undefined);
   const hasTasks = looseTasks.length > 0;
@@ -1391,19 +1398,11 @@ export function App(): ReactElement {
           className={sync.error === null ? "band-sync" : "band-sync is-error"}
           onClick={(): void => void refresh()}
           disabled={sync.loading || hasToken !== true}
-          title="Atualizar agora (R)"
+          title={`${syncText}. Atualizar agora (R)`}
           aria-live="polite"
         >
           <RefreshCw className={sync.loading ? "spin" : ""} size={14} strokeWidth={2} aria-hidden />
-          <span className="band-sync-text">
-            {sync.loading
-              ? "Sincronizando…"
-              : sync.error !== null
-                ? `Falha ao sincronizar: ${sync.error}`
-                : sync.at !== null
-                  ? `Sincronizado às ${clock(sync.at)}`
-                  : "Atualizar"}
-          </span>
+          <span className="band-sync-text">{syncText}</span>
         </button>
         <div className="band-actions">
           <button

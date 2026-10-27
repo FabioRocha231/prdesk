@@ -220,7 +220,11 @@ function rawPull(s: Seed): Record<string, unknown> {
     },
     reviewRequests: { nodes: (s.requested ?? []).map((login) => ({ requestedReviewer: { login } })) },
     latestReviews: {
-      nodes: (s.reviews ?? []).map(([login, state, h]) => ({ author: { login }, state, submittedAt: ago(h) })),
+      nodes: (s.reviews ?? []).map(([login, state, h]) => ({
+        author: { login, avatarUrl: `https://github.com/${login}.png` },
+        state,
+        submittedAt: ago(h),
+      })),
     },
     reviewThreads: {
       nodes: (s.threads ?? []).map((t) => ({

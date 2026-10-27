@@ -1,4 +1,4 @@
-import { GripVertical, Hourglass, Info, Lock, MessageSquare, PanelLeftClose, UserPlus } from "lucide-react";
+import { GripVertical, Hourglass, Info, Layers, Lock, MessageSquare, PanelLeftClose, UserPlus } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
@@ -9,7 +9,16 @@ import { DEFAULT_LAYOUT, gridTemplate, type LaneLayout, moveLane, normalizeLayou
 import { COLUMN_HINT, COLUMN_LABEL, COLUMNS, type Column, type PullRequest, type TriagedPull } from "../lib/model";
 import { loadValue, saveValue } from "../lib/persist";
 import { needsReviewers, usualReviewers } from "../lib/reviewers";
-import { prCrew, prTrack } from "../lib/track";
+import {
+  type Crew,
+  clusterMarks,
+  prCrew,
+  prTrack,
+  STALE_HOURS,
+  sizeBand,
+  stackPosition,
+  workingHours,
+} from "../lib/track";
 import { blockers } from "./Daily";
 import { useAction } from "./useAction";
 
@@ -51,7 +60,16 @@ const AGENT_FLAG: Record<AgentState, { text: string; tone: string }> = {
   waiting: { text: "Agente aguardando você", tone: "warn" },
 };
 
-function Flags({ item, agent }: { item: TriagedPull; agent: AgentState | undefined }): ReactElement | null {
+function Flags({
+  item,
+  agent,
+  detailed,
+}: {
+  item: TriagedPull;
+  agent: AgentState | undefined;
+  /** The track already says how long the PR sat; no second "Parada há". */
+  detailed: boolean;
+}): ReactElement | null {
   const { pr } = item;
   const flags: { text: string; tone: string }[] = agent === undefined ? [] : [AGENT_FLAG[agent]];
   if (pr.branch === "conflicts") flags.push({ text: "Conflitos", tone: "warn" });
@@ -60,7 +78,7 @@ function Flags({ item, agent }: { item: TriagedPull; agent: AgentState | undefin
   if (pr.isDraft) flags.push({ text: "Rascunho", tone: "dim" });
   if (pr.reviewDecision === "APPROVED") flags.push({ text: "Aprovada", tone: "good" });
   // Only my PRs sit in "Aguardando"; days without a review there are worth a nudge (the PR's next step).
-  if (item.triage.column === "waiting" && blockers([item], Date.now()).length > 0)
+  if (!detailed && item.triage.column === "waiting" && blockers([item], Date.now()).length > 0)
     flags.push({ text: `Parada há ${age(item.triage.at ?? pr.updatedAt)}`, tone: "warn" });
   if (flags.length === 0) return null;
   return (
@@ -83,47 +101,117 @@ const CREW_TITLE: Record<string, string> = {
   asked: "review pedido, sem resposta ainda",
 };
 
+const AVATAR_SIZE = 32;
+const MAX_CREW = 3;
+
+/** "18h com bia": how long the PR has sat, and with whom when the column says so. */
+function idleWho(item: TriagedPull, crew: Crew[], me: string): string {
+  const column = item.triage.column;
+  if (column === "myTurn" || column === "reviewRequested") return " com você";
+  if (column !== "waiting") return "";
+  const asked = crew.filter((c): boolean => c.state === "asked" && c.login !== me);
+  const first = asked[0];
+  if (first === undefined) return "";
+  return asked.length > 1 ? ` com ${first.login} +${asked.length - 1}` : ` com ${first.login}`;
+}
+
 /**
  * The detailed card: the PR's life on one line (opened on the left, now on the right, the idle stretch dashed in the
- * column's hue), then who is reviewing and how big it is.
+ * column's hue and labelled with how long and with whom; amber once it passes a working day), then who is reviewing,
+ * where it sits in a stack, CI still running, and how big it is.
  */
-function Telemetry({ pr, me, now }: { pr: PullRequest; me: string; now: number }): ReactElement {
+function Telemetry({
+  item,
+  me,
+  now,
+  stack,
+}: {
+  item: TriagedPull;
+  me: string;
+  now: number;
+  stack: { index: number; total: number } | null;
+}): ReactElement {
+  const { pr } = item;
   const track = prTrack(pr, now);
+  const clusters = clusterMarks(track.marks);
   const crew = prCrew(pr);
   const openThreads = pr.threads.filter((t): boolean => !t.isResolved && !t.lastIsBot).length;
   const story = track.marks.map((m): string => m.label).join(", ");
+  const stale = workingHours(track.idleSince, now) >= STALE_HOURS;
+  const idle = `${age(new Date(track.idleSince).toISOString(), now)}${idleWho(item, crew, me)}`;
+  const ciRunning = pr.ciState === "PENDING" || pr.ciState === "EXPECTED";
   return (
-    <span className="telemetry">
-      <span className="track" role="img" aria-label={story === "" ? "nada aconteceu desde que abriu" : story}>
-        <span className="track-idle" style={{ left: `${track.idleFrom * 100}%` }} />
-        {track.marks.map(
-          (m): ReactElement => (
-            <span
-              key={`${m.kind}-${m.at}-${m.label}`}
-              className={`mark mark-${m.kind}`}
-              style={{ left: `${m.at * 100}%` }}
-              title={m.label}
-            />
-          ),
-        )}
+    <span className={stale ? "telemetry is-stale" : "telemetry"}>
+      <span className="track-line">
+        <span className="track" role="img" aria-label={story === "" ? "nada aconteceu desde que abriu" : story}>
+          <span className="track-idle" style={{ left: `${track.idleFrom * 100}%` }} />
+          {clusters.map(
+            (c): ReactElement => (
+              <span
+                key={`${c.at}-${c.labels.join()}`}
+                className={c.labels.length > 1 ? `mark mark-${c.kind} is-cluster` : `mark mark-${c.kind}`}
+                style={{ left: `${c.at * 100}%` }}
+                title={c.labels.join("\n")}
+              />
+            ),
+          )}
+        </span>
+        <span className="track-label" title={stale ? "Parada há mais de um dia útil" : "Tempo desde o último evento"}>
+          {idle}
+        </span>
       </span>
       <span className="crew-line">
         {crew.length === 0 && <span className="crew-none">ninguém revisando</span>}
-        {crew.map(
-          (c): ReactElement => (
+        {crew.slice(0, MAX_CREW).map((c): ReactElement => {
+          const avatar = pr.avatars?.[c.login];
+          return (
             <span key={c.login} className={`crew crew-${c.state}`} title={`${c.login}: ${CREW_TITLE[c.state]}`}>
+              {avatar !== undefined && (
+                <img
+                  className="crew-avatar"
+                  src={`${avatar}${avatar.includes("?") ? "&" : "?"}s=${AVATAR_SIZE}`}
+                  alt=""
+                  loading="lazy"
+                  onError={(e): void => {
+                    // No avatar (offline, renamed account): the login alone still reads fine.
+                    e.currentTarget.hidden = true;
+                  }}
+                />
+              )}
               {c.login === me ? "você" : c.login}
             </span>
-          ),
+          );
+        })}
+        {crew.length > MAX_CREW && (
+          <span
+            className="crew-more"
+            title={crew
+              .slice(MAX_CREW)
+              .map((c): string => `${c.login}: ${CREW_TITLE[c.state]}`)
+              .join("\n")}
+          >
+            +{crew.length - MAX_CREW}
+          </span>
         )}
         <span className="facts">
+          {ciRunning && (
+            <span className="fact fact-ci" title="CI ainda rodando">
+              CI
+            </span>
+          )}
+          {stack !== null && (
+            <span className="fact" title={`PR ${stack.index} de ${stack.total} numa pilha de branches`}>
+              <Layers size={12} strokeWidth={2} aria-hidden /> {stack.index}/{stack.total}
+            </span>
+          )}
           {openThreads > 0 && (
             <span className="fact" title={`${openThreads} conversa(s) aberta(s)`}>
               <MessageSquare size={12} strokeWidth={2} aria-hidden /> {openThreads}
             </span>
           )}
           {pr.size !== undefined && (
-            <span className="fact" title={`${pr.size.files} arquivo(s)`}>
+            <span className="fact" title={`${SIZE_TITLE[sizeBand(pr.size)]}, ${pr.size.files} arquivo(s)`}>
+              <span className="fact-band">{sizeBand(pr.size)}</span>
               <b className="fact-add">+{pr.size.additions}</b> <b className="fact-del">−{pr.size.deletions}</b>
             </span>
           )}
@@ -132,6 +220,8 @@ function Telemetry({ pr, me, now }: { pr: PullRequest; me: string; now: number }
     </span>
   );
 }
+
+const SIZE_TITLE = { P: "Pequena", M: "Média", G: "Grande" } as const;
 
 export type AskReview = (pr: PullRequest, logins: string[]) => Promise<void>;
 
@@ -312,6 +402,7 @@ function Row({
   detailed,
   me,
   now,
+  stack,
   reviewers,
   onAskReview,
   onSelect,
@@ -322,6 +413,7 @@ function Row({
   detailed: boolean;
   me: string;
   now: number;
+  stack: { index: number; total: number } | null;
   /** Who "Pedir review" would ask; null when the card offers no such button. */
   reviewers: string[] | null;
   onAskReview: AskReview | undefined;
@@ -365,10 +457,10 @@ function Row({
               {triage.actor !== null && <b>{triage.actor} </b>}
               {triage.reason}
             </span>
-            <Flags item={item} agent={agent} />
+            <Flags item={item} agent={agent} detailed={detailed && !rail} />
           </span>
         )}
-        {detailed && !rail && <Telemetry pr={pr} me={me} now={now} />}
+        {detailed && !rail && <Telemetry item={item} me={me} now={now} stack={stack} />}
       </button>
       {(waitsOn.length > 0 || blocks.length > 0 || ask) && (
         <span className="row-deps">
@@ -667,6 +759,7 @@ export function Board({
                 detailed={detailed}
                 me={me}
                 now={now}
+                stack={detailed ? stackPosition(item.pr, allPulls) : null}
                 reviewers={reviewersFor(item)}
                 onAskReview={onAskReview}
                 onSelect={onSelect}

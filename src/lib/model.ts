@@ -73,6 +73,8 @@ export interface PullRequest {
   branch: "ok" | "behind" | "conflicts";
   /** PRs the description says must merge first ("Depende de org/repo#12"). */
   dependsOn: PrRef[];
+  /** Avatar URL per reviewer login, for the detailed card. */
+  avatars?: Record<string, string>;
   /** Lines added and removed, and files touched. */
   size?: { additions: number; deletions: number; files: number };
   /** Set only for PRs opened outside the board (from the feed) that are no longer open. */

@@ -23,8 +23,8 @@ const PR_FIELDS = `
     repository { nameWithOwner url }
     author { login }
     commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
-    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login } } } }
-    latestReviews(first: 20) { nodes { author { __typename login } state submittedAt } }
+    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login avatarUrl } } } }
+    latestReviews(first: 20) { nodes { author { __typename login avatarUrl } state submittedAt } }
     reviewThreads(first: 30) {
       nodes {
         isResolved
@@ -101,8 +101,14 @@ interface RawPull {
   repository: { nameWithOwner: string; url: string };
   author: Login | null;
   commits: { nodes: { commit: { committedDate: string; statusCheckRollup: { state: CiState } | null } }[] };
-  reviewRequests: { nodes: { requestedReviewer: Partial<Login> | null }[] };
-  latestReviews: { nodes: { author: (Login & { __typename: string }) | null; state: string; submittedAt: string }[] };
+  reviewRequests: { nodes: { requestedReviewer: (Partial<Login> & { avatarUrl?: string }) | null }[] };
+  latestReviews: {
+    nodes: {
+      author: (Login & { __typename: string; avatarUrl?: string }) | null;
+      state: string;
+      submittedAt: string;
+    }[];
+  };
   reviewThreads: {
     nodes: {
       isResolved: boolean;
@@ -176,6 +182,14 @@ function toPull(raw: RawPull & { id: string }): PullRequest {
           ],
     ),
     threads: raw.reviewThreads.nodes.map(toThread),
+    avatars: Object.fromEntries(
+      [
+        ...raw.latestReviews.nodes.map((r) => r.author),
+        ...raw.reviewRequests.nodes.map((r) => r.requestedReviewer),
+      ].flatMap((u): [string, string][] =>
+        u?.login === undefined || u.avatarUrl === undefined ? [] : [[u.login, u.avatarUrl]],
+      ),
+    ),
     lastComment: human?.author == null ? null : { author: human.author.login, at: human.createdAt },
   };
 }
