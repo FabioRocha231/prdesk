@@ -25,4 +25,8 @@ CI runs all of the above; keep it green before pushing.
 
 - When a keyboard shortcut or action starts working from a new view, check that its result is visible from that view (e.g. the agent terminal only docks inside a PR, so starting an agent from the board must open the PR first).
 - Before offering an action that calls a GitHub mutation, read the preconditions GitHub enforces for it (repo settings, PR state) and only show the action when they hold; an option that always fails is worse than none (e.g. auto-merge needs `autoMergeAllowed` and a PR that is not already CLEAN or conflicting).
+
+<!-- engineering-learn:live -->
+- State that is written after a long `await` (cloning, an agent run, a push, a loop of GitHub calls) must be written with a functional update (`setX((all) => …)`), never from the render's captured copy: anything that changed meanwhile would be overwritten (e.g. mission delivery and launch now use `updateTasks`).
+<!-- /engineering-learn:live -->
 <!-- /engineering-learn:live -->

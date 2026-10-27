@@ -558,6 +558,15 @@ export function App(): ReactElement {
     void saveValue("tasks", next);
   };
 
+  /** For changes decided after a long await: applies `change` to the latest tasks, not a stale render's copy. */
+  const updateTasks = (change: (all: Record<string, Task>) => Record<string, Task>): void => {
+    setTasks((all) => {
+      const next = change(all);
+      void saveValue("tasks", next);
+      return next;
+    });
+  };
+
   const createTask = async (repo: string, branch: string, text: string, issue?: number): Promise<void> => {
     if (config === null) return;
     setNewTaskOpen(false);
@@ -788,7 +797,7 @@ export function App(): ReactElement {
       return;
     }
     const title = parsed.plan.title || m.title;
-    const next: Record<string, Task> = { ...tasks };
+    const next: Record<string, Task> = {};
     for (const p of prepared.parts) {
       next[p.taskId] = {
         id: p.taskId,
@@ -800,7 +809,7 @@ export function App(): ReactElement {
         mission: id,
       };
     }
-    saveTasks(next);
+    updateTasks((all) => ({ ...all, ...next }));
     await saveMission({ ...prepared, phase: "running", propagated: planHash(text) });
     await Promise.all(
       prepared.parts.map(async (p): Promise<void> => {
@@ -990,7 +999,7 @@ export function App(): ReactElement {
       ),
     }));
     const doneIds = new Set(opened.flatMap((o): string[] => (o.task === undefined ? [] : [o.task.id])));
-    saveTasks(Object.fromEntries(Object.entries(tasks).filter(([k]): boolean => !doneIds.has(k))));
+    updateTasks((all) => Object.fromEntries(Object.entries(all).filter(([k]): boolean => !doneIds.has(k))));
     const allOpen = current.parts.every((p): boolean => p.pr !== undefined);
     await saveMission(allOpen && current.error === undefined ? { ...current, phase: "delivered" } : current);
     void refresh();
