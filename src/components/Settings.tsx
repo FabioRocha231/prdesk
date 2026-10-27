@@ -442,7 +442,7 @@ export function Settings({
               </span>
             ) : (
               <button type="button" className="text-button" onClick={leave}>
-                Voltar ao quadro <kbd>esc</kbd>
+                Voltar às PRs <kbd>esc</kbd>
               </button>
             ))}
           <button

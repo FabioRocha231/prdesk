@@ -17,7 +17,7 @@ describe("highlight", () => {
     expect(tokens?.[0]).toBeNull();
     for (const i of [1, 2, 3]) {
       expect(tokens?.[i]?.map((t) => t.content).join("")).toBe(lines[i]?.text);
-      expect(tokens?.[i]?.some((t) => t.color !== undefined)).toBe(true);
+      expect(tokens?.[i]?.some((t) => t.light !== undefined && t.dark !== undefined)).toBe(true);
     }
   });
 });

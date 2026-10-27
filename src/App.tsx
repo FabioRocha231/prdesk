@@ -7,9 +7,12 @@ import {
   CircleDot,
   CircleHelp,
   Clock,
+  Columns3,
   GitGraph,
+  GitPullRequest,
   GitPullRequestCreate,
   Link2,
+  List as ListIcon,
   RefreshCw,
   Search as SearchIcon,
   Settings as SettingsIcon,
@@ -31,6 +34,7 @@ import { HelpDialog } from "./components/Help";
 import { IssuesDialog } from "./components/Issues";
 import { MissionsView, NewMissionDialog, type PartStatus } from "./components/Mission";
 import { Palette } from "./components/Palette";
+import { PrList } from "./components/PrList";
 import { BranchPrDialog, RadarStrip } from "./components/Radar";
 import { RepoFilter } from "./components/RepoFilter";
 import type { AiState } from "./components/Review";
@@ -77,6 +81,7 @@ import {
   requestReviewers,
   type StrayBranch,
 } from "./lib/github";
+import { holderGroups } from "./lib/holders";
 import {
   type Activity,
   agentRun,
@@ -148,6 +153,15 @@ const NOTES_EVERY_MS = 30 * SECOND;
 
 const BOARD_CACHE_KEY = "board";
 
+type View = "board" | "settings" | "tree" | "chains" | "missions";
+const VIEW_TITLE: Record<View, string> = {
+  board: "Pull requests",
+  settings: "Ajustes",
+  tree: "Árvore",
+  chains: "Encadeadas",
+  missions: "Missões",
+};
+
 /** "https://api.github.com/graphql" → "github.com"; a GHE host stays as is. */
 function webHost(apiUrl: string): string {
   return new URL(apiUrl).host.replace(/^api\./, "");
@@ -181,7 +195,7 @@ function isTyping(target: EventTarget | null): boolean {
 export function App(): ReactElement {
   const [config, setConfig] = useState<Config | null>(null);
   const [hasToken, setHasToken] = useState<boolean | null>(null);
-  const [view, setView] = useState<"board" | "settings" | "tree" | "chains" | "missions">("board");
+  const [view, setView] = useState<View>("board");
   const [missions, setMissions] = useState<Mission[]>([]);
   const [missionPlans, setMissionPlans] = useState<Record<string, string>>({});
   const [openMissionId, setOpenMissionId] = useState<string | null>(null);
@@ -213,6 +227,8 @@ export function App(): ReactElement {
   const [showSnoozed, setShowSnoozed] = useState(false);
   const [repoFilter, setRepoFilter] = useState<string[]>([]);
   const [detailed, setDetailed] = useState(false);
+  // The board as one list grouped by who holds the ball (default) or as columns.
+  const [boardView, setBoardView] = useState<"list" | "columns">("list");
   // Terminal dock height in px once the user resized it; null keeps the default share of the window.
   const [dockHeight, setDockHeight] = useState<number | null>(null);
   const [dockDragging, setDockDragging] = useState(false);
@@ -255,6 +271,8 @@ export function App(): ReactElement {
       setTasks(await loadValue<Record<string, Task>>("tasks", {}));
       setRepoFilter(await loadValue<string[]>("repoFilter", []));
       setDetailed(await loadValue<boolean>("boardDetailed", false));
+      // Older versions stored "orbit", which became the list.
+      setBoardView((await loadValue<string>("boardView", "list")) === "columns" ? "columns" : "list");
       setDockHeight(await loadValue<number | null>("dockHeight", null));
       // Last sync's board shows at once; the first refresh then only fetches what changed while the app was closed.
       try {
@@ -399,9 +417,21 @@ export function App(): ReactElement {
       ),
     [pulls, snoozes, showSnoozed, shownRepos],
   );
+  const repoCounts = useMemo((): Map<string, number> => {
+    const counts = new Map<string, number>();
+    for (const p of pulls ?? []) counts.set(p.repo, (counts.get(p.repo) ?? 0) + 1);
+    return counts;
+  }, [pulls]);
   const changeRepoFilter = (next: string[]): void => {
     setRepoFilter(next);
     void saveValue("repoFilter", next);
+  };
+  const toggleBoardView = (): void => {
+    setBoardView((v) => {
+      const next = v === "list" ? "columns" : "list";
+      void saveValue("boardView", next);
+      return next;
+    });
   };
   const toggleDetailed = (): void => {
     setDetailed((on) => {
@@ -422,7 +452,14 @@ export function App(): ReactElement {
     () => dependencyIndex([...(pulls ?? []), ...Object.values(extra).filter((p): boolean => p.closed === undefined)]),
     [pulls, extra],
   );
-  const ordered = useMemo((): TriagedPull[] => COLUMNS.flatMap((c): TriagedPull[] => groups[c]), [groups]);
+  // j/k follow what is on screen: the list's groups, or the columns.
+  const ordered = useMemo(
+    (): TriagedPull[] =>
+      boardView === "columns"
+        ? COLUMNS.flatMap((c): TriagedPull[] => groups[c])
+        : holderGroups(groups).flatMap((g): TriagedPull[] => g.items),
+    [groups, boardView],
+  );
   const chains = useMemo((): TriagedPull[][][] => {
     const byId = new Map(ordered.map((t): [string, TriagedPull] => [t.pr.id, t]));
     const triaged = (p: PullRequest): TriagedPull[] => {
@@ -453,9 +490,13 @@ export function App(): ReactElement {
     [config],
   );
 
+  // Opening a PR loads it, and so does a sync that finds it changed on GitHub: replies an agent posts from the
+  // terminal, a review, a push. Without the second, the open PR kept what it showed when it was opened.
+  const selectedStamp = selected?.pr.updatedAt;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the stamp is the trigger; loadDetail reads the id
   useEffect((): void => {
     if (selectedId !== null) void loadDetail(selectedId);
-  }, [selectedId, loadDetail]);
+  }, [selectedId, selectedStamp, loadDetail]);
 
   const agentForRepo = (repo: string): Agent | undefined =>
     config === null ? undefined : agentFor(config, repo, agentPicks[repo]);
@@ -1228,7 +1269,11 @@ export function App(): ReactElement {
       setView(view === "missions" ? "board" : "missions");
       return;
     }
-    if (e.key === "d" && view === "board" && !inDetail) {
+    if (e.key === "b" && view === "board" && !inDetail) {
+      toggleBoardView();
+      return;
+    }
+    if (e.key === "d" && view === "board" && !inDetail && boardView === "columns") {
       toggleDetailed();
       return;
     }
@@ -1282,7 +1327,11 @@ export function App(): ReactElement {
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: re-runs when the highlight moves; the DOM holds the row
   useEffect((): void => {
-    document.querySelector('.board:not(.rail) .row[aria-current="true"]')?.scrollIntoView({ block: "nearest" });
+    document
+      .querySelector(
+        '.board:not(.rail) .row[aria-current="true"], .prlist:not(.is-compact) .pl-row[aria-current="true"]',
+      )
+      ?.scrollIntoView({ block: "nearest" });
   }, [cursor]);
 
   useEffect((): (() => void) => {
@@ -1381,11 +1430,11 @@ export function App(): ReactElement {
 
   return (
     <div className="app">
-      <header className="band">
+      <aside className="side" aria-label="prdesk">
         <button
           type="button"
           className="wordmark"
-          title="Voltar ao quadro"
+          title="Voltar às PRs"
           onClick={(): void => {
             setView("board");
             navigate(null);
@@ -1393,480 +1442,537 @@ export function App(): ReactElement {
         >
           prdesk
         </button>
-        <button
-          type="button"
-          className={sync.error === null ? "band-sync" : "band-sync is-error"}
-          onClick={(): void => void refresh()}
-          disabled={sync.loading || hasToken !== true}
-          title={`${syncText}. Atualizar agora (R)`}
-          aria-live="polite"
-        >
-          <RefreshCw className={sync.loading ? "spin" : ""} size={14} strokeWidth={2} aria-hidden />
-          <span className="band-sync-text">{syncText}</span>
-        </button>
-        <div className="band-actions">
+        <nav className="side-nav" aria-label="Seções">
           <button
             type="button"
-            className="band-search"
-            title="Buscar PR (⌘K)"
-            onClick={(): void => setPaletteOpen(true)}
+            className="side-item"
+            aria-current={view === "board"}
+            onClick={(): void => {
+              setView("board");
+              navigate(null);
+            }}
           >
-            <SearchIcon size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Buscar PR</span>{" "}
-            <kbd>⌘K</kbd>
+            <GitPullRequest size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Pull requests</span>
+            {pulls !== null && <b>{visible.length}</b>}
           </button>
           <button
             type="button"
-            className="text-button"
+            className="side-item"
             title="Novidades (N)"
             onClick={openFeed}
             aria-label={unread > 0 ? `Novidades, ${unread} não lidas` : "Novidades"}
           >
-            <Bell size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Novidades</span>
-            {unread > 0 && <span className="band-count">{unread}</span>}
+            <Bell size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Novidades</span>
+            {unread > 0 && <b className="is-new">{unread}</b>}
           </button>
           <button
             type="button"
-            className="text-button"
+            className="side-item"
             disabled={hasToken !== true}
             title="Issues atribuídas a você (I)"
             onClick={(): void => setIssuesOpen(true)}
           >
-            <CircleDot size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Issues</span>
-            {issues !== null && issues.length > 0 && <span className="band-count muted">{issues.length}</span>}
+            <CircleDot size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Issues</span>
+            {issues !== null && issues.length > 0 && <b>{issues.length}</b>}
           </button>
           {snoozedCount > 0 && (
             <button
               type="button"
-              className="text-button"
+              className="side-item"
               aria-pressed={showSnoozed}
-              title={showSnoozed ? "Esconder as PRs adiadas" : "Mostrar as PRs adiadas no quadro"}
+              title={showSnoozed ? "Esconder as PRs adiadas" : "Mostrar as PRs adiadas na lista"}
               onClick={(): void => setShowSnoozed(!showSnoozed)}
             >
-              <Clock size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Adiadas</span>{" "}
-              <span className="band-count muted">{snoozedCount}</span>
-            </button>
-          )}
-          {view === "board" && !inDetail && (
-            <button
-              type="button"
-              className="text-button"
-              aria-pressed={detailed}
-              title="Mostrar nos cards a linha do tempo, quem revisa e o tamanho da PR (D)"
-              onClick={toggleDetailed}
-            >
-              <ActivityIcon size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Detalhes</span>
+              <Clock size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Adiadas</span>
+              <b>{snoozedCount}</b>
             </button>
           )}
           {chains.length > 0 && (
             <button
               type="button"
-              className="text-button"
-              aria-pressed={view === "chains"}
+              className="side-item"
+              aria-current={view === "chains"}
               title="PRs ligadas por dependência, na ordem de merge"
               onClick={(): void => setView(view === "chains" ? "board" : "chains")}
             >
-              <Link2 size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Encadeadas</span>{" "}
-              <span className="band-count muted">{chains.length}</span>
+              <Link2 size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Encadeadas</span>
+              <b>{chains.length}</b>
             </button>
           )}
           <button
             type="button"
-            className="text-button"
-            aria-pressed={view === "tree"}
+            className="side-item"
+            aria-current={view === "tree"}
             title="Árvore de branches de um repositório (T)"
             onClick={(): void => setView(view === "tree" ? "board" : "tree")}
           >
-            <GitGraph size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Árvore</span>
+            <GitGraph size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Árvore</span>
           </button>
           <button
             type="button"
-            className="text-button"
-            aria-pressed={view === "missions"}
+            className="side-item"
+            aria-current={view === "missions"}
             disabled={hasToken !== true}
             title="Missões: uma mudança em vários repos, um agente por repo (M)"
             onClick={(): void => setView(view === "missions" ? "board" : "missions")}
           >
-            <Workflow size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Missões</span>
-            {runningMissions > 0 && <span className="band-count muted">{runningMissions}</span>}
+            <Workflow size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Missões</span>
+            {runningMissions > 0 && <b>{runningMissions}</b>}
           </button>
           <button
             type="button"
-            className="text-button"
+            className="side-item"
             disabled={hasToken !== true}
             title="Resumo para a daily"
             onClick={(): void => setDailyOpen(true)}
           >
-            <CalendarCheck size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Daily</span>
+            <CalendarCheck size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Daily</span>
           </button>
-          <span className="band-rule" aria-hidden />
+        </nav>
+        {chipRepos.length > 1 && (
+          <RepoFilter orgs={repoOrgs} filter={shownRepos} counts={repoCounts} onChange={changeRepoFilter} />
+        )}
+        <div className="side-foot">
+          <UpdateButton />
+          <button type="button" className="side-item" title="Como usar (?)" onClick={(): void => setHelpOpen(true)}>
+            <CircleHelp size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Como usar</span>
+          </button>
           <button
             type="button"
-            className="icon-button"
-            aria-label="Como usar (?)"
-            title="Como usar (?)"
-            onClick={(): void => setHelpOpen(true)}
-          >
-            <CircleHelp size={17} strokeWidth={2} aria-hidden />
-          </button>
-          <button
-            type="button"
-            className="icon-button"
-            aria-label="Ajustes (,)"
+            className="side-item"
             title={me === null ? "Ajustes (,)" : `Ajustes (,) · conectado como @${me}`}
             aria-current={view === "settings"}
             onClick={(): void => setView("settings")}
           >
-            <SettingsIcon size={17} strokeWidth={2} aria-hidden />
+            <SettingsIcon size={16} strokeWidth={2} aria-hidden />
+            <span className="side-label">Ajustes</span>
           </button>
-          <UpdateButton />
+        </div>
+      </aside>
+
+      <div className="shell">
+        <header className="bar">
+          <h1 className="bar-title">{VIEW_TITLE[view]}</h1>
           <button
             type="button"
-            className="band-primary"
+            className={sync.error === null ? "bar-sync" : "bar-sync is-error"}
+            onClick={(): void => void refresh()}
+            disabled={sync.loading || hasToken !== true}
+            title={`${syncText}. Atualizar agora (R)`}
+            aria-live="polite"
+          >
+            <RefreshCw className={sync.loading ? "spin" : ""} size={13} strokeWidth={2} aria-hidden />
+            <span className="bar-sync-text">{syncText}</span>
+          </button>
+          <span className="bar-gap" />
+          {view === "board" && !inDetail && (
+            <fieldset className="bar-seg" aria-label="Como mostrar as PRs (B)">
+              <button
+                type="button"
+                aria-pressed={boardView === "list"}
+                title="Lista, agrupada por quem está com a PR (B)"
+                onClick={(): void => {
+                  if (boardView !== "list") toggleBoardView();
+                }}
+              >
+                <ListIcon size={15} strokeWidth={2} aria-hidden /> Lista
+              </button>
+              <button
+                type="button"
+                aria-pressed={boardView === "columns"}
+                title="Colunas por status (B)"
+                onClick={(): void => {
+                  if (boardView !== "columns") toggleBoardView();
+                }}
+              >
+                <Columns3 size={15} strokeWidth={2} aria-hidden /> Colunas
+              </button>
+            </fieldset>
+          )}
+          {view === "board" && !inDetail && boardView === "columns" && (
+            <button
+              type="button"
+              className="bar-button"
+              aria-pressed={detailed}
+              title="Mostrar nos cards a linha do tempo, quem revisa e o tamanho da PR (D)"
+              onClick={toggleDetailed}
+            >
+              <ActivityIcon size={15} strokeWidth={2} aria-hidden /> Detalhes
+            </button>
+          )}
+          <button
+            type="button"
+            className="bar-search"
+            title="Buscar PR (⌘K)"
+            onClick={(): void => setPaletteOpen(true)}
+          >
+            <SearchIcon size={14} strokeWidth={2} aria-hidden /> <span>Buscar PR</span> <kbd>⌘K</kbd>
+          </button>
+          <button
+            type="button"
+            className="bar-primary"
             title="Nova PR com agente (P)"
             disabled={hasToken !== true}
             onClick={(): void => setNewTaskOpen(true)}
           >
-            <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Nova PR</span>{" "}
-            <kbd>P</kbd>
+            <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> Nova PR
           </button>
-        </div>
-      </header>
+        </header>
 
-      {helpOpen && <HelpDialog onClose={(): void => setHelpOpen(false)} />}
+        {helpOpen && <HelpDialog onClose={(): void => setHelpOpen(false)} />}
 
-      {feedOpen && (
-        <Feed items={feed} seenAt={feedSeenAt} onPick={(a): void => void pickActivity(a)} onClose={closeFeed} />
-      )}
+        {feedOpen && (
+          <Feed items={feed} seenAt={feedSeenAt} onPick={(a): void => void pickActivity(a)} onClose={closeFeed} />
+        )}
 
-      {newTaskOpen && (
-        <NewTaskDialog
-          repos={knownRepos}
-          seed={taskSeed}
-          onClose={(): void => {
-            setNewTaskOpen(false);
-            setTaskSeed(null);
-          }}
-          onCreate={(repo, branch, text, issue): void => void createTask(repo, branch, text, issue)}
-        />
-      )}
-
-      {newMissionOpen && (
-        <NewMissionDialog
-          repos={knownRepos}
-          onClose={(): void => setNewMissionOpen(false)}
-          onCreate={(request, repos): void => void createMission(request, repos)}
-        />
-      )}
-
-      {issuesOpen && (
-        <IssuesDialog
-          issues={issues}
-          error={issuesError}
-          onStart={startIssue}
-          onOpenUrl={(url): void => void openUrl(url)}
-          onClose={(): void => setIssuesOpen(false)}
-        />
-      )}
-
-      {stray !== null && (
-        <BranchPrDialog
-          config={config}
-          branch={stray}
-          onCreated={(number): void => void branchOpened(stray, number)}
-          onClose={(): void => setStray(null)}
-        />
-      )}
-
-      {dailyOpen && <DailyDialog config={config} waiting={groups.waiting} onClose={(): void => setDailyOpen(false)} />}
-
-      {paletteOpen && (
-        <Palette
-          items={ordered}
-          onClose={(): void => setPaletteOpen(false)}
-          onPick={(id): void => {
-            setPaletteOpen(false);
-            navigate(id);
-          }}
-        />
-      )}
-
-      <main
-        className={mainClass}
-        {...(dockHeight === null ? {} : { style: { ["--dock" as string]: `${dockHeight}px` } })}
-      >
-        {view === "settings" && (
-          <Settings
-            config={config}
-            firstRun={hasToken !== true}
-            onSave={saveSettings}
-            onTokenChange={(): void => void checkToken()}
-            onClose={(): void => setView("board")}
-            openRefs={new Set((pulls ?? []).map((p): string => refKey(p)))}
-            busyPaths={
-              new Set(Object.values(sessions).flatMap((s): string[] => (s.status === "running" ? [s.cwd] : [])))
-            }
+        {newTaskOpen && (
+          <NewTaskDialog
+            repos={knownRepos}
+            seed={taskSeed}
+            onClose={(): void => {
+              setNewTaskOpen(false);
+              setTaskSeed(null);
+            }}
+            onCreate={(repo, branch, text, issue): void => void createTask(repo, branch, text, issue)}
           />
         )}
 
-        {view === "chains" && (
-          <Chains
-            chains={chains}
-            onSelect={(id): void => {
-              setView("board");
+        {newMissionOpen && (
+          <NewMissionDialog
+            repos={knownRepos}
+            onClose={(): void => setNewMissionOpen(false)}
+            onCreate={(request, repos): void => void createMission(request, repos)}
+          />
+        )}
+
+        {issuesOpen && (
+          <IssuesDialog
+            issues={issues}
+            error={issuesError}
+            onStart={startIssue}
+            onOpenUrl={(url): void => void openUrl(url)}
+            onClose={(): void => setIssuesOpen(false)}
+          />
+        )}
+
+        {stray !== null && (
+          <BranchPrDialog
+            config={config}
+            branch={stray}
+            onCreated={(number): void => void branchOpened(stray, number)}
+            onClose={(): void => setStray(null)}
+          />
+        )}
+
+        {dailyOpen && (
+          <DailyDialog config={config} waiting={groups.waiting} onClose={(): void => setDailyOpen(false)} />
+        )}
+
+        {paletteOpen && (
+          <Palette
+            items={ordered}
+            onClose={(): void => setPaletteOpen(false)}
+            onPick={(id): void => {
+              setPaletteOpen(false);
               navigate(id);
             }}
           />
         )}
 
-        {view === "missions" && (
-          <MissionsView
-            missions={missions}
-            selectedId={openMissionId}
-            plans={missionPlans}
-            notes={partNotes}
-            checks={missionChecks}
-            partStatus={partStatus}
-            canPlan={(agentForRepo("")?.headless.trim() ?? "") !== ""}
-            onSelect={setOpenMissionId}
-            onNew={(): void => setNewMissionOpen(true)}
-            onSavePlan={writePlan}
-            onReloadPlan={(id): void => void readPlan(id)}
-            onReveal={(id): void => {
-              if (config === null) return;
-              void missionPlanPath(config.workspaceDir, id).then(revealItemInDir);
-            }}
-            onReplan={(id): void => void replanMission(id)}
-            onLaunch={(id): void => void launchMission(id)}
-            onPropagate={(id): void => void propagatePlan(id)}
-            onCheck={(id): void => void checkMission(id)}
-            onDeliver={(id): void => void deliverMission(id)}
-            onOpenPr={(repo, number): void => {
-              setView("board");
-              void openRef({ repo, number });
-            }}
-            onOpenPart={(taskId): void => {
-              setView("board");
-              navigate(taskId);
-            }}
-          />
-        )}
-
-        {view === "tree" && (
-          <TreeView pulls={pulls ?? []} onOpenPr={(repo, number): void => void openRef({ repo, number })} />
-        )}
-
-        {view === "board" && !inDetail && (hasTasks || hasRadar || chipRepos.length > 1 || runningMissions > 0) && (
-          <div className="strips">
-            {runningMissions > 0 && (
-              <nav className="tasks-strip" aria-label="Missões em andamento">
-                <span className="tasks-label">Missões</span>
-                {missions
-                  .filter((m): boolean => m.phase === "running")
-                  .map((m): ReactElement => {
-                    const waiting = m.parts.filter((p): boolean =>
-                      ["contract", "waiting", "error"].includes(partStatus(m, p)),
-                    ).length;
-                    return (
-                      <button
-                        key={m.id}
-                        type="button"
-                        className={waiting > 0 ? "task-chip is-bad" : "task-chip"}
-                        onClick={(): void => {
-                          setOpenMissionId(m.id);
-                          setView("missions");
-                        }}
-                      >
-                        <Workflow size={14} strokeWidth={2} aria-hidden />
-                        <span className="task-text">{m.title}</span>
-                        <span className="task-live">
-                          {waiting > 0 ? `${waiting} aguardando você` : `${m.parts.length} repos`}
-                        </span>
-                      </button>
-                    );
-                  })}
-              </nav>
-            )}
-            {hasTasks && (
-              <nav className="tasks-strip" aria-label="Tarefas em andamento">
-                <span className="tasks-label">Em andamento</span>
-                {looseTasks.map(
-                  (t): ReactElement => (
-                    <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
-                      <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
-                      <span className="task-repo">{t.repo}</span>
-                      <span className="task-text">{t.text}</span>
-                      {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
-                    </button>
-                  ),
-                )}
-              </nav>
-            )}
-            {hasRadar && (
-              <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenUrl={(url): void => void openUrl(url)} />
-            )}
-            {chipRepos.length > 1 && <RepoFilter orgs={repoOrgs} filter={shownRepos} onChange={changeRepoFilter} />}
-          </div>
-        )}
-
-        {view === "board" && !inDetail && (
-          <Board
-            groups={groups}
-            deps={deps}
-            loading={pulls === null}
-            selectedId={cursor}
-            agents={agentStates}
-            rail={false}
-            detailed={detailed}
-            me={me ?? ""}
-            onAskReview={askReview}
-            onSelect={navigate}
-          />
-        )}
-
-        {inDetail && selectedTask !== undefined && selected === null && (
-          <>
-            <aside className="rail-wrap">
-              <button
-                type="button"
-                className="back"
-                onClick={(): void => {
-                  navigate(null);
-                  if (selectedTask.mission !== undefined) {
-                    setOpenMissionId(selectedTask.mission);
-                    setView("missions");
-                  }
-                }}
-              >
-                <ArrowLeft size={20} strokeWidth={2.5} aria-hidden />
-                <span>{selectedTask.mission === undefined ? "Voltar ao quadro" : "Voltar à missão"}</span>
-                <kbd>Esc</kbd>
-              </button>
-              <Board groups={groups} deps={deps} loading={false} selectedId={null} rail onSelect={navigate} />
-            </aside>
-            <TaskView
-              key={selectedTask.id}
-              task={selectedTask}
+        <main
+          className={mainClass}
+          {...(dockHeight === null ? {} : { style: { ["--dock" as string]: `${dockHeight}px` } })}
+        >
+          {view === "settings" && (
+            <Settings
               config={config}
-              ai={
-                selectedTask.cwd === null
-                  ? null
-                  : aiIn(selectedTask.repo, async (): Promise<string> => selectedTask.cwd ?? "")
+              firstRun={hasToken !== true}
+              onSave={saveSettings}
+              onTokenChange={(): void => void checkToken()}
+              onClose={(): void => setView("board")}
+              openRefs={new Set((pulls ?? []).map((p): string => refKey(p)))}
+              busyPaths={
+                new Set(Object.values(sessions).flatMap((s): string[] => (s.status === "running" ? [s.cwd] : [])))
               }
-              agentName={agentForRepo(selectedTask.repo)?.name ?? "agente"}
-              agentBusy={session?.status === "preparing" || session?.status === "running"}
-              onOpenAgent={reopen}
-              onCreated={(number): void => void taskOpened(selectedTask, number)}
             />
-          </>
-        )}
+          )}
 
-        {inDetail && selected !== null && (
-          <>
-            <aside className="rail-wrap">
-              <button type="button" className="back" onClick={(): void => navigate(null)}>
-                <ArrowLeft size={20} strokeWidth={2.5} aria-hidden />
-                <span>Voltar ao quadro</span>
-                <kbd>Esc</kbd>
-              </button>
-              <Board groups={groups} deps={deps} loading={false} selectedId={selectedId} rail onSelect={navigate} />
-              <p className="rail-hint">
-                <kbd>J</kbd> <kbd>K</kbd> para navegar
-              </p>
-            </aside>
-            <Detail
-              key={selected.pr.id}
-              item={selected}
-              me={me ?? ""}
-              config={config}
-              state={details[selected.pr.id] ?? { status: "loading" }}
-              agents={config.agents}
-              agentId={agentForRepo(selected.pr.repo)?.id ?? ""}
-              agentBusy={session?.status === "preparing"}
-              agentBlocked={session?.status === "running" || session?.status === "preparing"}
-              worktree={session?.status === "running" || session?.status === "exited" ? session.cwd : null}
-              drafts={drafts[selected.pr.id] ?? NO_DRAFTS}
-              aiState={aiStates[selected.pr.id] ?? IDLE_AI}
-              ai={aiFor(selected.pr)}
-              draftReply={replyDrafter(selected)}
-              snoozed={isSnoozed(snoozes[selected.pr.id], selected.pr, now)}
-              deps={deps.get(selected.pr.id) ?? NO_DEPS}
-              repoPulls={(pulls ?? []).filter((p): boolean => p.repo === selected.pr.repo)}
-              onOpenRef={(ref): void => void openRef(ref)}
-              onAgentChange={(id): void => setAgentPicks((p) => ({ ...p, [selected.pr.repo]: id }))}
-              onOpenAgent={(prompt?: string, context?: string): void => void openAgent(selected, prompt, context)}
-              onOpenGithub={(): void => void openUrl(selected.pr.url)}
-              onDrafts={(next): void => setDrafts((d) => ({ ...d, [selected.pr.id]: next }))}
-              onAnalyze={(files): void => void analyze(selected, files)}
-              onSnooze={(choice): void => snooze(selected, choice)}
-              onChanged={(): void => {
-                forceRefetch.current.add(selected.pr.id);
-                void loadDetail(selected.pr.id);
-                void refresh();
+          {view === "chains" && (
+            <Chains
+              chains={chains}
+              onSelect={(id): void => {
+                setView("board");
+                navigate(id);
               }}
             />
-          </>
-        )}
+          )}
 
-        <section className="dock" hidden={!dockOpen} aria-label="Terminal do agente">
-          {/* biome-ignore lint/a11y/useSemanticElements: a focusable splitter is an ARIA separator; <hr> cannot take drag or keys */}
-          <div
-            className={dockDragging ? "dock-grip is-dragging" : "dock-grip"}
-            role="separator"
-            aria-orientation="horizontal"
-            aria-label="Redimensionar o terminal (setas para cima e para baixo)"
-            aria-valuenow={dockHeight ?? undefined}
-            tabIndex={0}
-            onPointerDown={resizeDock}
-            onKeyDown={nudgeDock}
-            onDoubleClick={(): void => {
-              setDockHeight(null);
-              void saveValue("dockHeight", null);
-            }}
-          />
-          {selectedId !== null && session !== undefined && (
-            <div className="term-bar">
-              <span className="term-title">
-                <TerminalIcon className="term-icon" size={15} strokeWidth={2} aria-hidden />
-                <b>{session.agentName}</b>
-                {(session.status === "running" || session.status === "exited") && (
-                  <span className="term-cwd">{session.cwd}</span>
-                )}
-              </span>
-              <span className="term-actions">
-                {session.status === "exited" && (
-                  <button type="button" className="text-button" onClick={reopen}>
-                    Abrir de novo
-                  </button>
-                )}
-                {session.status !== "preparing" && (
-                  <button type="button" className="text-button" onClick={(): void => void closeSession(selectedId)}>
-                    <X size={15} strokeWidth={2} aria-hidden />
-                    {session.status === "running" ? "Encerrar" : "Fechar"}
-                  </button>
-                )}
-              </span>
+          {view === "missions" && (
+            <MissionsView
+              missions={missions}
+              selectedId={openMissionId}
+              plans={missionPlans}
+              notes={partNotes}
+              checks={missionChecks}
+              partStatus={partStatus}
+              canPlan={(agentForRepo("")?.headless.trim() ?? "") !== ""}
+              onSelect={setOpenMissionId}
+              onNew={(): void => setNewMissionOpen(true)}
+              onSavePlan={writePlan}
+              onReloadPlan={(id): void => void readPlan(id)}
+              onReveal={(id): void => {
+                if (config === null) return;
+                void missionPlanPath(config.workspaceDir, id).then(revealItemInDir);
+              }}
+              onReplan={(id): void => void replanMission(id)}
+              onLaunch={(id): void => void launchMission(id)}
+              onPropagate={(id): void => void propagatePlan(id)}
+              onCheck={(id): void => void checkMission(id)}
+              onDeliver={(id): void => void deliverMission(id)}
+              onOpenPr={(repo, number): void => {
+                setView("board");
+                void openRef({ repo, number });
+              }}
+              onOpenPart={(taskId): void => {
+                setView("board");
+                navigate(taskId);
+              }}
+            />
+          )}
+
+          {view === "tree" && (
+            <TreeView pulls={pulls ?? []} onOpenPr={(repo, number): void => void openRef({ repo, number })} />
+          )}
+
+          {view === "board" && !inDetail && (hasTasks || hasRadar || runningMissions > 0) && (
+            <div className="strips">
+              {runningMissions > 0 && (
+                <nav className="tasks-strip" aria-label="Missões em andamento">
+                  <span className="tasks-label">Missões</span>
+                  {missions
+                    .filter((m): boolean => m.phase === "running")
+                    .map((m): ReactElement => {
+                      const waiting = m.parts.filter((p): boolean =>
+                        ["contract", "waiting", "error"].includes(partStatus(m, p)),
+                      ).length;
+                      return (
+                        <button
+                          key={m.id}
+                          type="button"
+                          className={waiting > 0 ? "task-chip is-bad" : "task-chip"}
+                          onClick={(): void => {
+                            setOpenMissionId(m.id);
+                            setView("missions");
+                          }}
+                        >
+                          <Workflow size={14} strokeWidth={2} aria-hidden />
+                          <span className="task-text">{m.title}</span>
+                          <span className="task-live">
+                            {waiting > 0 ? `${waiting} aguardando você` : `${m.parts.length} repos`}
+                          </span>
+                        </button>
+                      );
+                    })}
+                </nav>
+              )}
+              {hasTasks && (
+                <nav className="tasks-strip" aria-label="Tarefas em andamento">
+                  <span className="tasks-label">Em andamento</span>
+                  {looseTasks.map(
+                    (t): ReactElement => (
+                      <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
+                        <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
+                        <span className="task-repo">{t.repo}</span>
+                        <span className="task-text">{t.text}</span>
+                        {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
+                      </button>
+                    ),
+                  )}
+                </nav>
+              )}
+              {hasRadar && (
+                <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenUrl={(url): void => void openUrl(url)} />
+              )}
             </div>
           )}
-          {session?.status === "preparing" && (
-            <p className="term-state pulse">
-              Preparando o worktree. Na primeira vez o repo é clonado, e isso pode levar um tempo
-            </p>
+
+          {view === "board" && !inDetail && boardView === "list" && (
+            <PrList
+              groups={groups}
+              loading={pulls === null}
+              selectedId={cursor}
+              onSelect={navigate}
+              onAskReview={askReview}
+            />
           )}
-          {session?.status === "error" && <p className="term-state error">{session.message}</p>}
-          {session?.status === "exited" && <p className="term-state">A sessão terminou.</p>}
-          {Object.entries(sessions).map(([prId, s]): ReactElement | null =>
-            s.status === "running" ? (
-              <Terminal
-                key={prId}
-                sessionId={s.sessionId}
-                visible={dockOpen && prId === selectedId}
-                onExit={onSessionExit}
-                onQuiet={onSessionQuiet}
+          {view === "board" && !inDetail && boardView === "columns" && (
+            <Board
+              groups={groups}
+              deps={deps}
+              loading={pulls === null}
+              selectedId={cursor}
+              agents={agentStates}
+              detailed={detailed}
+              me={me ?? ""}
+              onAskReview={askReview}
+              onSelect={navigate}
+            />
+          )}
+
+          {inDetail && selectedTask !== undefined && selected === null && (
+            <>
+              <aside className="rail-wrap">
+                <button
+                  type="button"
+                  className="back"
+                  onClick={(): void => {
+                    navigate(null);
+                    if (selectedTask.mission !== undefined) {
+                      setOpenMissionId(selectedTask.mission);
+                      setView("missions");
+                    }
+                  }}
+                >
+                  <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+                  <span>{selectedTask.mission === undefined ? "Voltar às PRs" : "Voltar à missão"}</span>
+                  <kbd>Esc</kbd>
+                </button>
+                <PrList groups={groups} loading={false} selectedId={null} compact onSelect={navigate} />
+              </aside>
+              <TaskView
+                key={selectedTask.id}
+                task={selectedTask}
+                config={config}
+                ai={
+                  selectedTask.cwd === null
+                    ? null
+                    : aiIn(selectedTask.repo, async (): Promise<string> => selectedTask.cwd ?? "")
+                }
+                agentName={agentForRepo(selectedTask.repo)?.name ?? "agente"}
+                agentBusy={session?.status === "preparing" || session?.status === "running"}
+                onOpenAgent={reopen}
+                onCreated={(number): void => void taskOpened(selectedTask, number)}
               />
-            ) : null,
+            </>
           )}
-        </section>
-      </main>
+
+          {inDetail && selected !== null && (
+            <>
+              <aside className="rail-wrap">
+                <button type="button" className="back" onClick={(): void => navigate(null)}>
+                  <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+                  <span>Voltar às PRs</span>
+                  <kbd>Esc</kbd>
+                </button>
+                <PrList groups={groups} loading={false} selectedId={selectedId} compact onSelect={navigate} />
+                <p className="rail-hint">
+                  <kbd>J</kbd> <kbd>K</kbd> para navegar
+                </p>
+              </aside>
+              <Detail
+                key={selected.pr.id}
+                item={selected}
+                me={me ?? ""}
+                config={config}
+                state={details[selected.pr.id] ?? { status: "loading" }}
+                agents={config.agents}
+                agentId={agentForRepo(selected.pr.repo)?.id ?? ""}
+                agentBusy={session?.status === "preparing"}
+                agentBlocked={session?.status === "running" || session?.status === "preparing"}
+                worktree={session?.status === "running" || session?.status === "exited" ? session.cwd : null}
+                drafts={drafts[selected.pr.id] ?? NO_DRAFTS}
+                aiState={aiStates[selected.pr.id] ?? IDLE_AI}
+                ai={aiFor(selected.pr)}
+                draftReply={replyDrafter(selected)}
+                snoozed={isSnoozed(snoozes[selected.pr.id], selected.pr, now)}
+                deps={deps.get(selected.pr.id) ?? NO_DEPS}
+                repoPulls={(pulls ?? []).filter((p): boolean => p.repo === selected.pr.repo)}
+                onOpenRef={(ref): void => void openRef(ref)}
+                onAgentChange={(id): void => setAgentPicks((p) => ({ ...p, [selected.pr.repo]: id }))}
+                onOpenAgent={(prompt?: string, context?: string): void => void openAgent(selected, prompt, context)}
+                onOpenGithub={(): void => void openUrl(selected.pr.url)}
+                onDrafts={(next): void => setDrafts((d) => ({ ...d, [selected.pr.id]: next }))}
+                onAnalyze={(files): void => void analyze(selected, files)}
+                onSnooze={(choice): void => snooze(selected, choice)}
+                onChanged={(): void => {
+                  forceRefetch.current.add(selected.pr.id);
+                  void loadDetail(selected.pr.id);
+                  void refresh();
+                }}
+              />
+            </>
+          )}
+
+          <section className="dock" hidden={!dockOpen} aria-label="Terminal do agente">
+            {/* biome-ignore lint/a11y/useSemanticElements: a focusable splitter is an ARIA separator; <hr> cannot take drag or keys */}
+            <div
+              className={dockDragging ? "dock-grip is-dragging" : "dock-grip"}
+              role="separator"
+              aria-orientation="horizontal"
+              aria-label="Redimensionar o terminal (setas para cima e para baixo)"
+              aria-valuenow={dockHeight ?? undefined}
+              tabIndex={0}
+              onPointerDown={resizeDock}
+              onKeyDown={nudgeDock}
+              onDoubleClick={(): void => {
+                setDockHeight(null);
+                void saveValue("dockHeight", null);
+              }}
+            />
+            {selectedId !== null && session !== undefined && (
+              <div className="term-bar">
+                <span className="term-title">
+                  <TerminalIcon className="term-icon" size={15} strokeWidth={2} aria-hidden />
+                  <b>{session.agentName}</b>
+                  {(session.status === "running" || session.status === "exited") && (
+                    <span className="term-cwd">{session.cwd}</span>
+                  )}
+                </span>
+                <span className="term-actions">
+                  {session.status === "exited" && (
+                    <button type="button" className="text-button" onClick={reopen}>
+                      Abrir de novo
+                    </button>
+                  )}
+                  {session.status !== "preparing" && (
+                    <button type="button" className="text-button" onClick={(): void => void closeSession(selectedId)}>
+                      <X size={15} strokeWidth={2} aria-hidden />
+                      {session.status === "running" ? "Encerrar" : "Fechar"}
+                    </button>
+                  )}
+                </span>
+              </div>
+            )}
+            {session?.status === "preparing" && (
+              <p className="term-state pulse">
+                Preparando o worktree. Na primeira vez o repo é clonado, e isso pode levar um tempo
+              </p>
+            )}
+            {session?.status === "error" && <p className="term-state error">{session.message}</p>}
+            {session?.status === "exited" && <p className="term-state">A sessão terminou.</p>}
+            {Object.entries(sessions).map(([prId, s]): ReactElement | null =>
+              s.status === "running" ? (
+                <Terminal
+                  key={prId}
+                  sessionId={s.sessionId}
+                  visible={dockOpen && prId === selectedId}
+                  onExit={onSessionExit}
+                  onQuiet={onSessionQuiet}
+                />
+              ) : null,
+            )}
+          </section>
+        </main>
+      </div>
     </div>
   );
 }

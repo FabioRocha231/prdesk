@@ -23,13 +23,22 @@ const PR_FIELDS = `
     repository { nameWithOwner url }
     author { login }
     commits(last: 1) { nodes { commit { committedDate statusCheckRollup { state } } } }
-    reviewRequests(first: 20) { nodes { requestedReviewer { ... on User { login avatarUrl } } } }
+    reviewRequests(first: 20) {
+      nodes { requestedReviewer { ... on User { login avatarUrl } ... on Team { slug } } }
+    }
+    timelineItems(last: 15, itemTypes: [REVIEW_REQUESTED_EVENT, READY_FOR_REVIEW_EVENT]) {
+      nodes {
+        __typename
+        ... on ReviewRequestedEvent { createdAt requestedReviewer { ... on User { login } ... on Team { slug } } }
+        ... on ReadyForReviewEvent { createdAt }
+      }
+    }
     latestReviews(first: 20) { nodes { author { __typename login avatarUrl } state submittedAt } }
     reviewThreads(first: 30) {
       nodes {
         isResolved
         first: comments(first: 1) { nodes { author { login } } }
-        last: comments(last: 1) { nodes { author { __typename login } createdAt } }
+        last: comments(last: 5) { nodes { author { __typename login } createdAt } }
       }
     }
     comments(last: 5) { nodes { author { __typename login } createdAt } }
@@ -70,8 +79,8 @@ const DETAIL_QUERY = `query($id: ID!) {
           comments(first: 50) { nodes { id author { __typename login avatarUrl } body bodyHTML createdAt diffHunk } }
         }
       }
-      comments(first: 100) { nodes { id author { __typename login avatarUrl } bodyHTML createdAt } }
-      reviews(first: 50) { nodes { id author { __typename login avatarUrl } state bodyHTML submittedAt } }
+      comments(last: 100) { nodes { id author { __typename login avatarUrl } bodyHTML createdAt } }
+      reviews(last: 100) { nodes { id author { __typename login avatarUrl } state bodyHTML submittedAt } }
     }
   }
 }`;
@@ -101,7 +110,19 @@ interface RawPull {
   repository: { nameWithOwner: string; url: string };
   author: Login | null;
   commits: { nodes: { commit: { committedDate: string; statusCheckRollup: { state: CiState } | null } }[] };
-  reviewRequests: { nodes: { requestedReviewer: (Partial<Login> & { avatarUrl?: string }) | null }[] };
+  reviewRequests: {
+    nodes: { requestedReviewer: (Partial<Login> & { avatarUrl?: string; slug?: string }) | null }[];
+  };
+  /** Absent in PRs cached before it was queried; the next detail sweep fills it. */
+  timelineItems?: {
+    nodes: {
+      __typename: string;
+      createdAt?: string;
+      requestedReviewer?: { login?: string; slug?: string } | null;
+    }[];
+  };
+  /** Set by the review-requested:@me search, which also matches requests to the viewer's teams. */
+  viewerRequested?: boolean;
   latestReviews: {
     nodes: {
       author: (Login & { __typename: string; avatarUrl?: string }) | null;
@@ -125,14 +146,30 @@ interface Search {
 }
 
 function toThread(raw: RawPull["reviewThreads"]["nodes"][number]): ThreadSummary {
-  const last = raw.last.nodes[0];
+  const last = raw.last.nodes.at(-1);
+  const first = raw.first.nodes[0]?.author?.login ?? null;
+  const recent = raw.last.nodes.flatMap((c): string[] => (c.author === null ? [] : [c.author.login]));
   return {
     isResolved: raw.isResolved,
-    firstAuthor: raw.first.nodes[0]?.author?.login ?? null,
+    firstAuthor: first,
     lastAuthor: last?.author?.login ?? null,
     lastIsBot: last?.author?.__typename === "Bot",
     lastAt: last?.createdAt ?? null,
+    participants: [...new Set([...(first === null ? [] : [first]), ...recent])],
   };
+}
+
+/** The latest request per reviewer, and when the PR last became ready for review. */
+function timeline(raw: RawPull): { requestedAt: Record<string, string>; readyAt: string | null } {
+  const requestedAt: Record<string, string> = {};
+  let readyAt: string | null = null;
+  for (const n of raw.timelineItems?.nodes ?? []) {
+    if (n.createdAt === undefined) continue;
+    if (n.__typename === "ReadyForReviewEvent") readyAt = n.createdAt;
+    const who = n.requestedReviewer?.login ?? n.requestedReviewer?.slug;
+    if (n.__typename === "ReviewRequestedEvent" && who !== undefined) requestedAt[who] = n.createdAt;
+  }
+  return { requestedAt, readyAt };
 }
 
 /** GitHub computes these lazily; UNKNOWN reads as "ok" until the next poll. */
@@ -144,6 +181,7 @@ function branchState(mergeable: string, mergeState: string): PullRequest["branch
 function toPull(raw: RawPull & { id: string }): PullRequest {
   const commit = raw.commits.nodes[0]?.commit;
   const human = raw.comments.nodes.filter((c): boolean => c.author !== null && c.author.__typename !== "Bot").at(-1);
+  const { requestedAt, readyAt } = timeline(raw);
   return {
     id: raw.id,
     number: raw.number,
@@ -169,6 +207,12 @@ function toPull(raw: RawPull & { id: string }): PullRequest {
     requestedReviewers: raw.reviewRequests.nodes.flatMap((r): string[] =>
       r.requestedReviewer?.login === undefined ? [] : [r.requestedReviewer.login],
     ),
+    requestedTeams: raw.reviewRequests.nodes.flatMap((r): string[] =>
+      r.requestedReviewer?.slug === undefined ? [] : [r.requestedReviewer.slug],
+    ),
+    viewerRequested: raw.viewerRequested === true,
+    requestedAt,
+    readyAt,
     reviews: raw.latestReviews.nodes.flatMap((r) =>
       r.author === null
         ? []
@@ -241,6 +285,7 @@ const DETAILS_QUERY = `query($ids: [ID!]!) { nodes(ids: $ids) { ${PR_FIELDS} } }
 
 export type Live = Pick<RawPull, "updatedAt" | "isDraft" | "reviewDecision" | "mergeable" | "commits"> & {
   id: string;
+  viewerRequested?: boolean;
 };
 
 /** Raw PRs by node id, as of the last sync; kept on disk so the board shows at once on the next launch. */
@@ -262,7 +307,14 @@ export function mergeLive(
   for (const l of live) {
     const base = fresh[l.id] ?? cache[l.id];
     const state = mergeStates.get(l.id);
-    if (base !== undefined) next[l.id] = { ...base, ...l, ...(state === undefined ? {} : { mergeStateStatus: state }) };
+    // viewerRequested is this sync's answer: a request answered since the last one must not linger from the cache.
+    if (base !== undefined)
+      next[l.id] = {
+        ...base,
+        ...l,
+        viewerRequested: l.viewerRequested === true,
+        ...(state === undefined ? {} : { mergeStateStatus: state }),
+      };
   }
   return next;
 }
@@ -272,14 +324,17 @@ export function pullsFromCache(cache: PullCache): PullRequest[] {
 }
 
 /** Pages are sequential because each needs the previous cursor. */
-async function searchLive(config: Config, q: string, into: Map<string, Live>): Promise<void> {
+async function searchLive(config: Config, q: string, into: Map<string, Live>, requested = false): Promise<void> {
   let cursor: string | null = null;
   for (let page = 0; page < MAX_LIVE_PAGES; page++) {
     const data: { search: { pageInfo: Search["pageInfo"]; nodes: (Live | Record<string, never>)[] } } =
       await githubGraphql(config.apiUrl, LIVE_QUERY, { q, cursor });
     for (const node of data.search.nodes) {
       // Search returns an empty object for non-PR hits.
-      if ("id" in node && typeof node.id === "string") into.set(node.id, node as Live);
+      if (!("id" in node) || typeof node.id !== "string") continue;
+      // The same PR can come from several searches; the review-request mark must survive the others.
+      const seen = into.get(node.id)?.viewerRequested === true;
+      into.set(node.id, { ...(node as Live), ...(requested || seen ? { viewerRequested: true } : {}) });
     }
     if (!data.search.pageInfo.hasNextPage) return;
     cursor = data.search.pageInfo.endCursor;
@@ -315,7 +370,8 @@ export async function fetchPulls(
   force: ReadonlySet<string> = new Set(),
 ): Promise<{ me: string; pulls: PullRequest[]; cache: PullCache }> {
   const live = new Map<string, Live>();
-  const queries = [`${BASE_FILTER} involves:@me`, `${BASE_FILTER} review-requested:@me`];
+  const REQUESTED = `${BASE_FILTER} review-requested:@me`;
+  const queries = [`${BASE_FILTER} involves:@me`, REQUESTED];
   if (config.scopes.length > 0) queries.push(`${BASE_FILTER} ${config.scopes.map(scopeQualifier).join(" ")}`);
 
   // GitHub queues one token's queries, so every extra request adds its full time; the merge-state one runs rarely.
@@ -329,7 +385,7 @@ export async function fetchPulls(
           { q: `${BASE_FILTER} author:@me` },
         )
       : null,
-    ...queries.map(async (q): Promise<void> => await searchLive(config, q, live)),
+    ...queries.map(async (q): Promise<void> => await searchLive(config, q, live, q === REQUESTED)),
   ]);
   if (mine !== null) mergeStateCheckedAt = Date.now();
   const mergeStates = new Map(

@@ -40,6 +40,8 @@ export interface ThreadSummary {
   /** The last word came from a bot (CodeRabbit, Copilot, linters): noise, not a turn. */
   lastIsBot: boolean;
   lastAt: string | null;
+  /** Everyone who wrote in it (first comment plus the last few), for "a thread I took part in". */
+  participants?: string[];
 }
 
 export interface LastComment {
@@ -65,6 +67,14 @@ export interface PullRequest {
   ciState: CiState | null;
   lastCommitAt: string | null;
   requestedReviewers: string[];
+  /** Teams asked to review, by slug. */
+  requestedTeams?: string[];
+  /** Review was asked of the viewer, directly or through one of their teams (GitHub's review-requested:@me). */
+  viewerRequested?: boolean;
+  /** When each reviewer (login, or team slug) was last asked; the moment the ball went to them. */
+  requestedAt?: Record<string, string>;
+  /** When the PR last left draft; null when it was opened ready. */
+  readyAt?: string | null;
   reviews: Review[];
   threads: ThreadSummary[];
   /** Latest human (non-bot) conversation comment. */
@@ -82,11 +92,53 @@ export interface PullRequest {
 }
 
 /** Whose turn it is, plus the evidence that put the PR there. */
+/** Who has to move next. */
+export type Holder =
+  | { kind: "me" }
+  /** Reviewers (logins or team slugs) asked and not answered yet. */
+  | { kind: "people"; logins: string[] }
+  /** Nobody is on it: still a draft, or open with nobody asked. */
+  | { kind: "nobody"; why: "draft" | "unrequested" }
+  /** Ready on its own, waiting for other PRs to merge first. */
+  | { kind: "dependency"; refs: string[] }
+  /** Someone else's PR with nothing for me: its author holds it. */
+  | { kind: "author"; login: string | null };
+
+/** Which rule placed the PR; the copy and the icons hang off this, never off the reason text. */
+export type TurnKind =
+  | "conflicts"
+  | "thread"
+  | "changes"
+  | "ci"
+  | "comment"
+  | "ask-again"
+  | "merge"
+  | "blocked-approved"
+  | "blocked"
+  | "draft"
+  | "review-wait"
+  | "rereview-wait"
+  | "unrequested"
+  | "reply"
+  | "review-requested"
+  | "review-again"
+  | "approved"
+  | "changes-requested"
+  | "open";
+
 export interface Triage {
   column: Column;
+  kind: TurnKind;
+  holder: Holder;
+  /** pt-BR line for the card, written from `kind` by describe(). */
   reason: string;
   actor: string | null;
+  /** When the ball reached its holder: what "parada há" counts from. */
   at: string | null;
+  /** How many items the rule saw (open threads, pending reviewers). */
+  count?: number;
+  /** The request came through one of my teams, not to me directly. */
+  viaTeam?: boolean;
 }
 
 export interface TriagedPull {

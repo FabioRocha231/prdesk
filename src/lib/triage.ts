@@ -1,106 +1,196 @@
 import { dependencyIndex, shortRef } from "./deps";
-import type { Column, PullRequest, Review, ThreadSummary, Triage, TriagedPull } from "./model";
+import { type PrFacts, prFacts } from "./facts";
+import type { Column, Holder, PullRequest, Triage, TriagedPull, TurnKind } from "./model";
 
-const FAILING_CI = new Set(["FAILURE", "ERROR"]);
-
-function isAfter(a: string | null, b: string | null): boolean {
-  if (a === null) return false;
-  if (b === null) return true;
-  return Date.parse(a) > Date.parse(b);
+/** What a rule decides; the column and the copy are derived from it. */
+interface Turn {
+  kind: TurnKind;
+  holder: Holder;
+  actor: string | null;
+  at: string | null;
+  count?: number;
+  viaTeam?: boolean;
 }
 
-function latestThread(threads: ThreadSummary[]): ThreadSummary | null {
-  return threads.reduce<ThreadSummary | null>(
-    (best, t): ThreadSummary | null => (best === null || isAfter(t.lastAt, best.lastAt) ? t : best),
-    null,
-  );
+/** One line of the table: the first rule that answers decides the PR. */
+type Rule = (f: PrFacts) => Turn | null;
+
+const ME: Holder = { kind: "me" };
+
+/** My PR. Order is priority: what blocks everything (conflicts) first, then what people said, then what waits. */
+const MINE: Rule[] = [
+  // Conflicts lead, matching the PR's next step (nextStep.ts). No event marks when they appeared.
+  (f) => (f.conflicting ? { kind: "conflicts", holder: ME, actor: null, at: f.pr.updatedAt } : null),
+  (f) => {
+    const [t] = f.threadsForMe;
+    return t === undefined
+      ? null
+      : { kind: "thread", holder: ME, actor: t.lastAuthor, at: t.lastAt, count: f.threadsForMe.length };
+  },
+  (f) =>
+    f.changesPending === null
+      ? null
+      : { kind: "changes", holder: ME, actor: f.changesPending.author, at: f.changesPending.submittedAt },
+  (f) => (f.ciFailing ? { kind: "ci", holder: ME, actor: null, at: f.pr.lastCommitAt } : null),
+  (f) =>
+    f.newComment === null ? null : { kind: "comment", holder: ME, actor: f.newComment.author, at: f.newComment.at },
+  // Changes were requested, I pushed, and nobody asked the reviewer back: they will not look on their own.
+  (f) => {
+    const [who] = f.askAgain;
+    return who === undefined || f.pr.isDraft
+      ? null
+      : { kind: "ask-again", holder: ME, actor: who, at: f.pr.lastCommitAt, count: f.askAgain.length };
+  },
+  (f) =>
+    f.approved && f.blockedBy.length > 0
+      ? {
+          kind: "blocked-approved",
+          holder: { kind: "dependency", refs: f.blockedBy },
+          actor: null,
+          at: f.approval?.submittedAt ?? f.pr.updatedAt,
+        }
+      : null,
+  (f) =>
+    f.approved
+      ? { kind: "merge", holder: ME, actor: f.approval?.author ?? null, at: f.approval?.submittedAt ?? null }
+      : null,
+  (f) =>
+    f.pr.isDraft ? { kind: "draft", holder: { kind: "nobody", why: "draft" }, actor: null, at: f.pr.createdAt } : null,
+  // Ready, nobody asked, but it can only merge after others: the dependency holds it, not a missing reviewer.
+  (f) =>
+    f.blockedBy.length > 0 && f.pendingReviewers.length === 0
+      ? { kind: "blocked", holder: { kind: "dependency", refs: f.blockedBy }, actor: null, at: f.readyAt }
+      : null,
+  (f) => {
+    const [first] = f.pendingReviewers;
+    if (first === undefined) return null;
+    return {
+      kind: f.reviewed ? "rereview-wait" : "review-wait",
+      holder: { kind: "people", logins: f.pendingReviewers },
+      actor: first,
+      at: f.askedAt(f.pendingReviewers) ?? f.readyAt,
+      count: f.pendingReviewers.length,
+    };
+  },
+  (f) => ({ kind: "unrequested", holder: { kind: "nobody", why: "unrequested" }, actor: null, at: f.readyAt }),
+];
+
+/** Someone else's PR: it is mine to act on only when I am answered, asked, or the code moved under my review. */
+const THEIRS: Rule[] = [
+  (f) => {
+    const [t] = f.threadsForMe;
+    return t === undefined
+      ? null
+      : { kind: "reply", holder: ME, actor: t.lastAuthor, at: t.lastAt, count: f.threadsForMe.length };
+  },
+  (f) =>
+    f.requestedOfMe
+      ? {
+          kind: "review-requested",
+          holder: ME,
+          actor: f.pr.author,
+          at: f.askedAt([...f.pr.requestedReviewers, ...(f.pr.requestedTeams ?? [])]) ?? f.readyAt,
+          viaTeam: f.requestedViaTeam,
+        }
+      : null,
+  (f) =>
+    f.pushedSinceMyReview && !f.pr.isDraft
+      ? { kind: "review-again", holder: ME, actor: f.pr.author, at: f.pr.lastCommitAt }
+      : null,
+  (f) => {
+    const holder: Holder = { kind: "author", login: f.pr.author };
+    const kind: TurnKind = f.approved
+      ? "approved"
+      : f.pr.reviewDecision === "CHANGES_REQUESTED"
+        ? "changes-requested"
+        : f.pr.isDraft
+          ? "draft"
+          : "open";
+    return { kind, holder, actor: f.pr.author, at: f.pr.updatedAt };
+  },
+];
+
+const REVIEW_KINDS: ReadonlySet<TurnKind> = new Set(["review-requested", "review-again"]);
+
+function columnOf(turn: Turn, mine: boolean): Column {
+  if (turn.holder.kind === "me") return REVIEW_KINDS.has(turn.kind) ? "reviewRequested" : "myTurn";
+  return mine ? "waiting" : "others";
 }
 
-function latestReview(reviews: Review[]): Review | null {
-  return reviews.reduce<Review | null>(
-    (best, r): Review | null => (best === null || isAfter(r.submittedAt, best.submittedAt) ? r : best),
-    null,
-  );
-}
+const more = (count: number | undefined): string => (count !== undefined && count > 1 ? ` (+${count - 1})` : "");
 
-function result(column: Column, reason: string, actor: string | null, at: string | null): Triage {
-  return { column, reason, actor, at };
-}
-
-function triageMine(pr: PullRequest, me: string, waitingOn: string[]): Triage {
-  // Conflicts block everything else, so they lead, matching the PR's next step (nextStep.ts).
-  if (pr.branch === "conflicts") return result("myTurn", "tem conflitos para resolver", null, pr.updatedAt);
-
-  // Bot threads (CodeRabbit & co.) are noise: they never make it my turn.
-  const open = pr.threads.filter(
-    (t): boolean => !t.isResolved && !t.lastIsBot && t.lastAuthor !== null && t.lastAuthor !== me,
-  );
-  const thread = latestThread(open);
-  if (thread !== null) {
-    const more = open.length > 1 ? ` (+${open.length - 1})` : "";
-    return result("myTurn", `comentou numa thread${more}`, thread.lastAuthor, thread.lastAt);
+/** The card's line, in pt-BR, after the actor's name. Copy lives here so rules stay about decisions only. */
+export function describe(t: Pick<Triage, "kind" | "count" | "viaTeam">): string {
+  switch (t.kind) {
+    case "conflicts":
+      return "tem conflitos para resolver";
+    case "thread":
+      return `comentou numa thread${more(t.count)}`;
+    case "changes":
+      return "pediu mudanças";
+    case "ci":
+      return "CI falhando";
+    case "comment":
+      return "comentou";
+    case "ask-again":
+      return `pediu mudanças; peça nova revisão${more(t.count)}`;
+    case "merge":
+      return "aprovou, pronta para merge";
+    case "blocked-approved":
+      return "aprovada, esperando dependência";
+    case "blocked":
+      return "esperando dependência";
+    case "draft":
+      return "rascunho";
+    case "review-wait":
+      return `vai revisar${more(t.count)}`;
+    case "rereview-wait":
+      return `vai revisar de novo${more(t.count)}`;
+    case "unrequested":
+      return "ninguém foi chamado para revisar";
+    case "reply":
+      return `respondeu você${more(t.count)}`;
+    case "review-requested":
+      return t.viaTeam === true ? "pediu review do seu time" : "pediu seu review";
+    case "review-again":
+      return "fez commits depois do seu review";
+    case "approved":
+      return "aprovada";
+    case "changes-requested":
+      return "com mudanças pedidas";
+    case "open":
+      return "aberta";
   }
-
-  const changes = latestReview(pr.reviews.filter((r): boolean => r.state === "CHANGES_REQUESTED"));
-  if (changes !== null && isAfter(changes.submittedAt, pr.lastCommitAt)) {
-    return result("myTurn", "pediu mudanças", changes.author, changes.submittedAt);
-  }
-
-  if (pr.ciState !== null && FAILING_CI.has(pr.ciState)) {
-    return result("myTurn", "CI falhando", null, pr.lastCommitAt);
-  }
-
-  const comment = pr.lastComment;
-  if (comment !== null && comment.author !== me && isAfter(comment.at, pr.lastCommitAt)) {
-    return result("myTurn", "comentou", comment.author, comment.at);
-  }
-
-  if (pr.reviewDecision === "APPROVED" && !pr.isDraft && waitingOn.length > 0) {
-    return result("waiting", "aprovada, esperando dependência", null, pr.updatedAt);
-  }
-
-  if (pr.reviewDecision === "APPROVED" && !pr.isDraft) {
-    const approval = latestReview(pr.reviews.filter((r): boolean => r.state === "APPROVED"));
-    return result("myTurn", "aprovou, pronta para merge", approval?.author ?? null, approval?.submittedAt ?? null);
-  }
-
-  if (pr.isDraft) return result("waiting", "rascunho", null, pr.updatedAt);
-  if (pr.reviews.length === 0) return result("waiting", "sem review ainda", null, pr.createdAt);
-  const last = latestReview(pr.reviews);
-  return result("waiting", "aguardando nova rodada de review", last?.author ?? null, last?.submittedAt ?? null);
-}
-
-function triageTheirs(pr: PullRequest, me: string): Triage {
-  const replies = pr.threads.filter(
-    (t): boolean =>
-      !t.isResolved && !t.lastIsBot && t.firstAuthor === me && t.lastAuthor !== null && t.lastAuthor !== me,
-  );
-  const reply = latestThread(replies);
-  if (reply !== null) {
-    return result("myTurn", "respondeu sua thread", reply.lastAuthor, reply.lastAt);
-  }
-
-  if (pr.requestedReviewers.includes(me)) {
-    return result("reviewRequested", "pediu seu review", pr.author, pr.updatedAt);
-  }
-
-  const mine = latestReview(pr.reviews.filter((r): boolean => r.author === me));
-  if (mine !== null && isAfter(pr.lastCommitAt, mine.submittedAt)) {
-    return result("reviewRequested", "fez commits depois do seu review", pr.author, pr.lastCommitAt);
-  }
-
-  if (pr.reviewDecision === "APPROVED") return result("others", "aprovada", pr.author, pr.updatedAt);
-  if (pr.reviewDecision === "CHANGES_REQUESTED")
-    return result("others", "com mudanças pedidas", pr.author, pr.updatedAt);
-  return result("others", pr.isDraft ? "rascunho" : "aberta", pr.author, pr.updatedAt);
 }
 
 /** Decides whose turn a PR is, from `me`'s point of view. `waitingOn` lists open PRs that must merge first. */
 export function triage(pr: PullRequest, me: string, waitingOn: string[] = []): Triage {
-  return pr.author === me ? triageMine(pr, me, waitingOn) : triageTheirs(pr, me);
+  const f = prFacts(pr, me, waitingOn);
+  const rules = f.mine ? MINE : THEIRS;
+  let turn: Turn | null = null;
+  for (const rule of rules) {
+    turn = rule(f);
+    if (turn !== null) break;
+  }
+  // The last rule of each table always answers.
+  const t = turn ?? { kind: "open", holder: { kind: "author", login: pr.author }, actor: pr.author, at: pr.updatedAt };
+  return {
+    column: columnOf(t, f.mine),
+    kind: t.kind,
+    holder: t.holder,
+    actor: t.actor,
+    at: t.at,
+    reason: describe(t),
+    ...(t.count === undefined ? {} : { count: t.count }),
+    ...(t.viaTeam === true ? { viaTeam: true } : {}),
+  };
 }
 
-/** Groups PRs by column, most recent activity first in every column. */
+// Columns where the ball is with me show the longest-waiting first (the slow tail is what hurts); the rest show the
+// latest activity first.
+const OLDEST_FIRST: ReadonlySet<Column> = new Set(["myTurn", "reviewRequested"]);
+
+/** Groups PRs by column and orders each one. */
 export function board(prs: PullRequest[], me: string): Record<Column, TriagedPull[]> {
   const groups: Record<Column, TriagedPull[]> = { myTurn: [], reviewRequested: [], waiting: [], others: [] };
   const deps = dependencyIndex(prs);
@@ -109,7 +199,9 @@ export function board(prs: PullRequest[], me: string): Record<Column, TriagedPul
     const t = triage(pr, me, open.map(shortRef));
     groups[t.column].push({ pr, triage: t });
   }
-  const recent = (p: TriagedPull): number => Date.parse(p.triage.at ?? p.pr.updatedAt);
-  for (const items of Object.values(groups)) items.sort((a, b): number => recent(b) - recent(a));
+  const at = (p: TriagedPull): number => Date.parse(p.triage.at ?? p.pr.updatedAt);
+  for (const [column, items] of Object.entries(groups) as [Column, TriagedPull[]][]) {
+    items.sort((a, b): number => (OLDEST_FIRST.has(column) ? at(a) - at(b) : at(b) - at(a)));
+  }
   return groups;
 }

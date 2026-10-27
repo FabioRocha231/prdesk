@@ -14,7 +14,7 @@ describe("standupText", () => {
   const item = { repo: "acme/api", number: 7, title: "Fix login", url: "u", deploys: [] };
   const stuck = {
     pr: { repo: "acme/web", number: 9, title: "Cart", isDraft: false, updatedAt: "2026-10-20T10:00:00Z" },
-    triage: { at: "2026-10-20T10:00:00Z" },
+    triage: { at: "2026-10-20T10:00:00Z", holder: { kind: "people", logins: ["bia"] } },
   } as TriagedPull;
 
   it("lists what moved and what is blocked", () => {

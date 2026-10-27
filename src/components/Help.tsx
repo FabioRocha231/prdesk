@@ -4,19 +4,24 @@ import { useEffect, useRef } from "react";
 
 const GUIDE: { title: string; items: [string, string][] }[] = [
   {
-    title: "O quadro",
+    title: "As PRs",
     items: [
-      ["Sua vez", "o que espera você agora. Comece por aqui."],
-      ["Review pedido", "PRs de outras pessoas aguardando o seu review."],
-      ["Aguardando", "suas PRs esperando os outros."],
+      ["Com você", "o que espera você agora, a mais antiga primeiro: responder, revisar, resolver conflitos, mergear."],
+      ["Com uma pessoa", "suas PRs que estão com alguém, como um revisor que ainda não olhou. Uma seção por pessoa."],
+      ["Com ninguém", "rascunhos, PRs sem revisor e as que esperam outra PR. Daqui dá para pedir review."],
+      ["Do time", "PRs de outras pessoas sem nada com você agora. Ficam fechadas no fim da lista."],
+      ["Repositórios", "na barra lateral, cada repo com sua cor, a mesma da bolinha nas linhas. Clique para filtrar."],
       ["Novidades", "o que aconteceu nas suas PRs, igual às notificações do GitHub."],
       ["Árvore", "escolha a pasta de um repositório: todas as branches, quais têm PR e as PRs mergeadas."],
       [
         "Depende de",
         "escreva “Depende de org/repo#123” na descrição: a PR espera a outra ser mergeada e você é avisado quando ela sai.",
       ],
-      ["Conflitos / Desatualizada", "a branch precisa de ajuste. Conflito na sua PR vira Sua vez e gera aviso."],
-      ["Parada há", "sua PR espera review há dias. Dentro dela, o próximo passo é cutucar quem foi pedido."],
+      ["Conflitos / Desatualizada", "a branch precisa de ajuste. Conflito na sua PR vai para Com você e gera aviso."],
+      [
+        "Tempo em âmbar",
+        "a PR está parada há mais de um dia útil. Dentro dela, o próximo passo é cutucar quem foi pedido.",
+      ],
       ["Sem PR", "branches que você subiu nos últimos 14 dias e ainda não têm PR. Clique para abrir uma."],
       ["Base falhando", "a branch principal do repo está com o CI vermelho: as PRs dele podem falhar por isso."],
       ["Issues", "as issues atribuídas a você. Começar uma abre o agente e a PR fecha a issue."],
@@ -53,7 +58,7 @@ const GUIDE: { title: string; items: [string, string][] }[] = [
 const KEYS: [string, string][] = [
   ["J / K", "próxima / anterior"],
   ["Enter", "abrir a PR destacada"],
-  ["Esc", "voltar ao quadro"],
+  ["Esc", "voltar às PRs"],
   ["C", "abrir no agente"],
   ["O", "abrir no GitHub"],
   ["⌘K", "buscar PR"],
@@ -62,7 +67,8 @@ const KEYS: [string, string][] = [
   ["P", "nova PR"],
   ["T", "árvore de branches"],
   ["M", "missões"],
-  ["D", "cards detalhados"],
+  ["B", "lista ou colunas"],
+  ["D", "cards detalhados (colunas)"],
   ["1–9 / 0", "filtrar por repositório / todos"],
   ["R", "atualizar"],
   [",", "ajustes"],

@@ -9,16 +9,7 @@ import { DEFAULT_LAYOUT, gridTemplate, type LaneLayout, moveLane, normalizeLayou
 import { COLUMN_HINT, COLUMN_LABEL, COLUMNS, type Column, type PullRequest, type TriagedPull } from "../lib/model";
 import { loadValue, saveValue } from "../lib/persist";
 import { needsReviewers, usualReviewers } from "../lib/reviewers";
-import {
-  type Crew,
-  clusterMarks,
-  prCrew,
-  prTrack,
-  STALE_HOURS,
-  sizeBand,
-  stackPosition,
-  workingHours,
-} from "../lib/track";
+import { clusterMarks, prCrew, prTrack, STALE_HOURS, sizeBand, stackPosition, workingHours } from "../lib/track";
 import { blockers } from "./Daily";
 import { useAction } from "./useAction";
 
@@ -105,14 +96,13 @@ const AVATAR_SIZE = 32;
 const MAX_CREW = 3;
 
 /** "18h com bia": how long the PR has sat, and with whom when the column says so. */
-function idleWho(item: TriagedPull, crew: Crew[], me: string): string {
-  const column = item.triage.column;
-  if (column === "myTurn" || column === "reviewRequested") return " com você";
-  if (column !== "waiting") return "";
-  const asked = crew.filter((c): boolean => c.state === "asked" && c.login !== me);
-  const first = asked[0];
+function idleWho(item: TriagedPull): string {
+  const holder = item.triage.holder;
+  if (holder.kind === "me") return " com você";
+  if (holder.kind !== "people") return "";
+  const [first, ...rest] = holder.logins;
   if (first === undefined) return "";
-  return asked.length > 1 ? ` com ${first.login} +${asked.length - 1}` : ` com ${first.login}`;
+  return rest.length > 0 ? ` com ${first} +${rest.length}` : ` com ${first}`;
 }
 
 /**
@@ -138,7 +128,7 @@ function Telemetry({
   const openThreads = pr.threads.filter((t): boolean => !t.isResolved && !t.lastIsBot).length;
   const story = track.marks.map((m): string => m.label).join(", ");
   const stale = workingHours(track.idleSince, now) >= STALE_HOURS;
-  const idle = `${age(new Date(track.idleSince).toISOString(), now)}${idleWho(item, crew, me)}`;
+  const idle = `${age(new Date(track.idleSince).toISOString(), now)}${idleWho(item)}`;
   const ciRunning = pr.ciState === "PENDING" || pr.ciState === "EXPECTED";
   return (
     <span className={stale ? "telemetry is-stale" : "telemetry"}>
@@ -226,7 +216,7 @@ const SIZE_TITLE = { P: "Pequena", M: "Média", G: "Grande" } as const;
 export type AskReview = (pr: PullRequest, logins: string[]) => Promise<void>;
 
 /** "Pedir review a bia e caio": readies a draft and asks whoever usually reviews in the repo. */
-function AskReviewButton({
+export function AskReviewButton({
   pr,
   logins,
   onAsk,
@@ -396,7 +386,6 @@ function Row({
   showOrg,
   repeat,
   onLinkHover,
-  rail,
   selected,
   agent,
   detailed,
@@ -423,15 +412,14 @@ function Row({
   showOrg: boolean;
   /** Same "who did what" as the card above: dimmed so the different ones stand out. */
   repeat: boolean;
-  rail: boolean;
   selected: boolean;
   onSelect: (id: string) => void;
   onLinkHover: (links: Link[]) => void;
 }): ReactElement {
   const { pr, triage } = item;
-  const waitsOn = rail ? [] : open(deps?.blockedBy ?? []);
-  const blocks = rail ? [] : open(deps?.blocks ?? []);
-  const repoName = showOrg && !rail ? pr.repo : (pr.repo.split("/")[1] ?? pr.repo);
+  const waitsOn = open(deps?.blockedBy ?? []);
+  const blocks = open(deps?.blocks ?? []);
+  const repoName = showOrg ? pr.repo : (pr.repo.split("/")[1] ?? pr.repo);
   const ask = reviewers !== null && onAskReview !== undefined;
   return (
     <li style={{ viewTransitionName: transitionName("pr", pr.id) }}>
@@ -448,19 +436,17 @@ function Row({
           <span className="row-num">#{pr.number}</span>
           <span className="row-age">{age(triage.at)}</span>
         </span>
-        <span className="row-title" style={rail ? undefined : { viewTransitionName: transitionName("title", pr.id) }}>
+        <span className="row-title" style={{ viewTransitionName: transitionName("title", pr.id) }}>
           {pr.title}
         </span>
-        {!rail && (
-          <span className="row-meta">
-            <span className={repeat ? "row-reason is-repeat" : "row-reason"}>
-              {triage.actor !== null && <b>{triage.actor} </b>}
-              {triage.reason}
-            </span>
-            <Flags item={item} agent={agent} detailed={detailed && !rail} />
+        <span className="row-meta">
+          <span className={repeat ? "row-reason is-repeat" : "row-reason"}>
+            {triage.actor !== null && <b>{triage.actor} </b>}
+            {triage.reason}
           </span>
-        )}
-        {detailed && !rail && <Telemetry item={item} me={me} now={now} stack={stack} />}
+          <Flags item={item} agent={agent} detailed={detailed} />
+        </span>
+        {detailed && <Telemetry item={item} me={me} now={now} stack={stack} />}
       </button>
       {(waitsOn.length > 0 || blocks.length > 0 || ask) && (
         <span className="row-deps">
@@ -484,27 +470,25 @@ function LaneHead({
 }: {
   column: Column;
   count: number;
-  /** Fold and reorder controls; absent in the rail. */
-  controls?: { onCollapse: () => void; onMove: (delta: number) => void };
+  /** Fold and reorder controls. */
+  controls: { onCollapse: () => void; onMove: (delta: number) => void };
 }): ReactElement {
   return (
     <h2 className="lane-head">
-      {controls !== undefined && (
-        <button
-          type="button"
-          className="lane-grip"
-          aria-label={`Mover ${COLUMN_LABEL[column]} (setas ← →, ou arraste)`}
-          title="Arraste para reordenar"
-          onKeyDown={(e): void => {
-            if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
-              e.preventDefault();
-              controls.onMove(e.key === "ArrowLeft" ? -1 : 1);
-            }
-          }}
-        >
-          <GripVertical size={13} strokeWidth={2} aria-hidden />
-        </button>
-      )}
+      <button
+        type="button"
+        className="lane-grip"
+        aria-label={`Mover ${COLUMN_LABEL[column]} (setas ← →, ou arraste)`}
+        title="Arraste para reordenar"
+        onKeyDown={(e): void => {
+          if (e.key === "ArrowLeft" || e.key === "ArrowRight") {
+            e.preventDefault();
+            controls.onMove(e.key === "ArrowLeft" ? -1 : 1);
+          }
+        }}
+      >
+        <GripVertical size={13} strokeWidth={2} aria-hidden />
+      </button>
       <span>{COLUMN_LABEL[column]}</span>
       <span className="lane-count">{count}</span>
       <span className="lane-hint">
@@ -520,17 +504,15 @@ function LaneHead({
           {COLUMN_HINT[column]}
         </span>
       </span>
-      {controls !== undefined && (
-        <button
-          type="button"
-          className="lane-info"
-          aria-label={`Recolher ${COLUMN_LABEL[column]}`}
-          title="Recolher coluna"
-          onClick={controls.onCollapse}
-        >
-          <PanelLeftClose size={14} strokeWidth={2} aria-hidden />
-        </button>
-      )}
+      <button
+        type="button"
+        className="lane-info"
+        aria-label={`Recolher ${COLUMN_LABEL[column]}`}
+        title="Recolher coluna"
+        onClick={controls.onCollapse}
+      >
+        <PanelLeftClose size={14} strokeWidth={2} aria-hidden />
+      </button>
     </h2>
   );
 }
@@ -653,7 +635,6 @@ export function Board({
   deps,
   loading,
   selectedId,
-  rail,
   agents = NO_AGENTS,
   detailed = false,
   me = "",
@@ -664,7 +645,6 @@ export function Board({
   deps: Map<string, Deps>;
   loading: boolean;
   selectedId: string | null;
-  rail: boolean;
   /** Agent state per PR id, for the cards that have one open. */
   agents?: ReadonlyMap<string, AgentState>;
   /** Cards show their track, reviewers and size. */
@@ -686,7 +666,7 @@ export function Board({
   const allPulls = COLUMNS.flatMap((c): PullRequest[] => groups[c].map((t): PullRequest => t.pr));
   const now = Date.now();
   const reviewersFor = ({ pr, triage }: TriagedPull): string[] | null => {
-    if (rail || onAskReview === undefined || triage.column !== "waiting" || !needsReviewers(pr)) return null;
+    if (onAskReview === undefined || triage.column !== "waiting" || !needsReviewers(pr)) return null;
     const logins = usualReviewers(allPulls, pr.repo, pr.author ?? "");
     return logins.length > 0 || pr.isDraft ? logins : null;
   };
@@ -712,8 +692,7 @@ export function Board({
 
   const lane = (column: Column, index: number): ReactElement | null => {
     const items = groups[column];
-    if (rail && items.length === 0) return null;
-    if (!rail && layout.collapsed[column]) {
+    if (layout.collapsed[column]) {
       return (
         <LaneStrip
           key={column}
@@ -730,15 +709,10 @@ export function Board({
         <LaneHead
           column={column}
           count={items.length}
-          {...(rail
-            ? {}
-            : {
-                controls: {
-                  onCollapse: (): void => toggle(column),
-                  onMove: (delta: number): void =>
-                    save({ ...layout, order: moveLane(layout.order, column, index + delta) }),
-                },
-              })}
+          controls={{
+            onCollapse: (): void => toggle(column),
+            onMove: (delta: number): void => save({ ...layout, order: moveLane(layout.order, column, index + delta) }),
+          }}
         />
         <ul className="lane-rows" aria-label={COLUMN_LABEL[column]}>
           {loading && SKELETON_KEYS.map((k): ReactElement => <li key={k} className="skeleton" aria-hidden />)}
@@ -753,7 +727,6 @@ export function Board({
                 showOrg={ambiguous.has(item.pr.repo.split("/")[1] ?? "")}
                 repeat={i > 0 && sameStory(items[i - 1], item)}
                 onLinkHover={(links): void => setLit(new Map(links.map((l): [string, Role] => [l.pr.id, l.role])))}
-                rail={rail}
                 selected={item.pr.id === selectedId}
                 agent={agents.get(item.pr.id)}
                 detailed={detailed}
@@ -770,14 +743,6 @@ export function Board({
       </div>
     );
   };
-
-  if (rail) {
-    return (
-      <section className="board rail" aria-label="PRs por status">
-        <div className="lanes">{layout.order.map(lane)}</div>
-      </section>
-    );
-  }
 
   return (
     <section className="board" aria-label="PRs por status">

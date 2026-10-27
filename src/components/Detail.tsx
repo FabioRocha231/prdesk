@@ -27,6 +27,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type AiRunner, IMPROVE_PROMPT, stripFence } from "../lib/ai";
 import { type Agent, type Config, contextPrompt } from "../lib/config";
 import { type DepLink, type Deps, isBlocked, type PrRef, refKey, shortRef } from "../lib/deps";
+import { prFacts, sameLogin } from "../lib/facts";
 import { age } from "../lib/format";
 import {
   addComment,
@@ -45,16 +46,9 @@ import {
   setLabels,
   updateBranch,
 } from "../lib/github";
+import { repoColor } from "../lib/holders";
 import { errorMessage, rerunFailedJobs, saveCiLog } from "../lib/ipc";
-import {
-  COLUMN_LABEL,
-  type DraftComment,
-  type PrFile,
-  type PullDetail,
-  type PullRequest,
-  type Thread,
-  type TriagedPull,
-} from "../lib/model";
+import type { DraftComment, PrFile, PullDetail, PullRequest, Thread, TriagedPull } from "../lib/model";
 import { type NextStep, nextStep } from "../lib/nextStep";
 import { transitionName } from "./Board";
 import { ChangesTab } from "./Changes";
@@ -63,6 +57,7 @@ import { blockers } from "./Daily";
 import { PrTree } from "./GitTree";
 import { Html } from "./Html";
 import { Menu, type MenuItem } from "./Menu";
+import { TurnBadge } from "./PrList";
 import { type AiState, ReviewTab } from "./Review";
 import { CommentView, htmlToText, isBotThread, PUSH_ROLES, type ReplyDrafter, ThreadsTab, waitsOnMe } from "./Threads";
 import { useAction } from "./useAction";
@@ -364,14 +359,9 @@ function ActionBar({
   const mergeReady = mine && pr.reviewDecision === "APPROVED" && !pr.isDraft && detail?.mergeable === "MERGEABLE";
   const mergeLabel = MERGE_LABEL[detail?.mergeMethod ?? ""] ?? detail?.mergeMethod ?? "";
   // Changes were requested, I pushed after them, and the reviewer has not been asked to look again.
-  const rereview = pr.reviews.some(
-    (r): boolean =>
-      r.state === "CHANGES_REQUESTED" &&
-      pr.lastCommitAt !== null &&
-      Date.parse(pr.lastCommitAt) > Date.parse(r.submittedAt) &&
-      !pr.requestedReviewers.includes(r.author),
-  );
-  const nudgeable = pr.requestedReviewers.filter((l): boolean => l !== me);
+  const facts = prFacts(pr, me);
+  const rereview = facts.askAgain.length > 0;
+  const nudgeable = pr.requestedReviewers.filter((l): boolean => !sameLogin(l, me));
   const stale =
     mine && item.triage.column === "waiting" && nudgeable.length > 0 && blockers([item], Date.now()).length > 0;
   const nudgeText = `${nudgeable.map((l): string => `@${l}`).join(" ")}, consegue dar uma olhada nesta PR quando puder?`;
@@ -920,14 +910,8 @@ export function Detail({
     [loaded, resolvedHere],
   );
   // An approval older than the last commit does not cover the new code: approving again is a real choice then.
-  const approved =
-    approvedHere ||
-    pr.reviews.some(
-      (r): boolean =>
-        r.author === me &&
-        r.state === "APPROVED" &&
-        (pr.lastCommitAt === null || Date.parse(r.submittedAt) >= Date.parse(pr.lastCommitAt)),
-    );
+  // An approval older than the last commit does not cover the new code (facts.ts): approving again is a real choice.
+  const approved = approvedHere || prFacts(pr, me).myApprovalHolds;
   const resolve = async (thread: Thread): Promise<void> => {
     setResolveError(null);
     setResolvedHere((s): ReadonlySet<string> => new Set(s).add(thread.id));
@@ -975,7 +959,10 @@ export function Detail({
     <article className={`detail poster-${triage.column}`} aria-label={`PR ${pr.number}`}>
       <header className="dhead">
         <div className="dhead-trail">
-          <span className="dhead-repo">{pr.repo}</span>
+          <span className="dhead-repo">
+            <span className="pl-dot" style={{ background: repoColor(pr.repo) }} aria-hidden />
+            {pr.repo} <span className="dhead-number">#{pr.number}</span>
+          </span>
           <span className="dhead-branch">
             {pr.author ?? "ghost"} → {pr.headRef}
           </span>
@@ -996,7 +983,6 @@ export function Detail({
         </div>
 
         <div className="dhead-main">
-          <span className="dhead-number">#{pr.number}</span>
           {editingTitle ? (
             <TitleEditor
               config={config}
@@ -1025,10 +1011,11 @@ export function Detail({
         </div>
 
         <div className="dhead-bar">
-          <span className="status-chip">
-            <span className="status-dot" aria-hidden />
-            {pr.closed === undefined ? COLUMN_LABEL[triage.column] : pr.closed === "MERGED" ? "Mergeada" : "Fechada"}
-          </span>
+          {pr.closed === undefined ? (
+            <TurnBadge kind={triage.kind} />
+          ) : (
+            <span className="turn">{pr.closed === "MERGED" ? "Mergeada" : "Fechada"}</span>
+          )}
           <span className="dhead-signal">
             {triage.actor !== null && <b>{triage.actor} </b>}
             {triage.reason}

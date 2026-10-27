@@ -1,9 +1,9 @@
-import type { HighlighterCore, LanguageInput, ThemedToken } from "shiki/core";
+import type { HighlighterCore, LanguageInput } from "shiki/core";
 
 import type { HunkLine } from "./diff";
 
-// GitHub's own dark-dimmed theme: same grammars family (TextMate) and colors GitHub uses, calm on our background.
-const THEME = "github-dark-dimmed";
+// GitHub's own themes (same TextMate grammars and colours GitHub uses): light, and dark-dimmed for the dark scheme.
+const THEMES = { light: "github-light", dark: "github-dark-dimmed" };
 // Big generated files highlight slowly and say little; past this they stay plain.
 const MAX_HIGHLIGHT_LINES = 3000;
 
@@ -53,13 +53,18 @@ let highlighter: Promise<HighlighterCore> | null = null;
 
 async function getHighlighter(): Promise<HighlighterCore> {
   highlighter ??= (async (): Promise<HighlighterCore> => {
-    const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, theme] = await Promise.all([
+    const [{ createHighlighterCore }, { createJavaScriptRegexEngine }, light, dark] = await Promise.all([
       import("shiki/core"),
       import("shiki/engine/javascript"),
+      import("shiki/dist/themes/github-light.mjs"),
       import("shiki/dist/themes/github-dark-dimmed.mjs"),
     ]);
     // The JS regex engine avoids WebAssembly, which the app's CSP does not allow.
-    return await createHighlighterCore({ themes: [theme.default], langs: [], engine: createJavaScriptRegexEngine() });
+    return await createHighlighterCore({
+      themes: [light.default, dark.default],
+      langs: [],
+      engine: createJavaScriptRegexEngine(),
+    });
   })();
   return await highlighter;
 }
@@ -72,7 +77,13 @@ export function languageOf(path: string): [string, Loader] | null {
   return ext === undefined ? null : (LANGS[ext] ?? null);
 }
 
-export type Token = Pick<ThemedToken, "content" | "color" | "fontStyle">;
+/** A token with its colour in each scheme; the stylesheet picks one (see .code-tok). */
+export interface Token {
+  content: string;
+  light: string | undefined;
+  dark: string | undefined;
+  fontStyle: number | undefined;
+}
 
 async function tokenize(code: string, path: string): Promise<Token[][] | null> {
   const lang = languageOf(path);
@@ -80,7 +91,16 @@ async function tokenize(code: string, path: string): Promise<Token[][] | null> {
   const hl = await getHighlighter();
   const [id, load] = lang;
   if (!hl.getLoadedLanguages().includes(id)) await hl.loadLanguage((await load()).default);
-  return hl.codeToTokensBase(code, { lang: id, theme: THEME });
+  return hl.codeToTokensWithThemes(code, { lang: id, themes: THEMES }).map((line): Token[] =>
+    line.map(
+      (t): Token => ({
+        content: t.content,
+        light: t.variants.light?.color,
+        dark: t.variants.dark?.color,
+        fontStyle: t.variants.light?.fontStyle,
+      }),
+    ),
+  );
 }
 
 /**

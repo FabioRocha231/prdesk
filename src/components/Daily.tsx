@@ -24,8 +24,9 @@ export function previousWorkday(now: Date): string {
 /** My PRs that have been waiting on others for a while: the blockers worth saying out loud. */
 export function blockers(waiting: TriagedPull[], now: number): TriagedPull[] {
   return waiting.filter((i): boolean => {
+    // Only PRs with reviewers asked and silent: a draft or one nobody was asked about is not "waiting for review".
     const since = i.triage.at ?? i.pr.updatedAt;
-    return !i.pr.isDraft && now - Date.parse(since) > BLOCKED_DAYS * DAY_MS;
+    return i.triage.holder.kind === "people" && now - Date.parse(since) > BLOCKED_DAYS * DAY_MS;
   });
 }
 

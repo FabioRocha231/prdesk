@@ -1,4 +1,4 @@
-import type { ReactElement } from "react";
+import type { CSSProperties, ReactElement } from "react";
 import { useEffect, useState } from "react";
 
 import type { HunkLine } from "../lib/diff";
@@ -36,14 +36,19 @@ export function CodeText({ text, tokens }: { text: string; tokens: Token[] | nul
   if (tokens == null || tokens.length === 0) return <code>{text === "" ? " " : text}</code>;
   return (
     <code>
-      {tokens.map(
-        (t, i): ReactElement => (
+      {tokens.map((t, i): ReactElement => {
+        const style = {
+          "--tok-light": t.light,
+          "--tok-dark": t.dark,
+          fontStyle: (t.fontStyle ?? 0) & ITALIC ? "italic" : undefined,
+        } as CSSProperties;
+        return (
           // biome-ignore lint/suspicious/noArrayIndexKey: tokens of a line are static
-          <span key={i} style={{ color: t.color, fontStyle: (t.fontStyle ?? 0) & ITALIC ? "italic" : undefined }}>
+          <span key={i} className="code-tok" style={style}>
             {t.content}
           </span>
-        ),
-      )}
+        );
+      })}
     </code>
   );
 }
