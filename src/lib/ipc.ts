@@ -64,8 +64,51 @@ export async function agentRun(
   return await invoke<string>("agent_run", { path, workspaceDir, command, context });
 }
 
-export async function writeAgentContext(path: string, workspaceDir: string, text: string): Promise<void> {
-  await invoke("write_agent_context", { path, workspaceDir, text });
+/** Writes `.prdesk/context.md` (or a mission's `plan.md`) in a worktree for the agent to read. */
+export async function writeAgentContext(
+  path: string,
+  workspaceDir: string,
+  text: string,
+  file: "context.md" | "plan.md" = "context.md",
+): Promise<void> {
+  await invoke("write_agent_context", { path, workspaceDir, text, file });
+}
+
+export type MissionFile = "plan.md" | "mission.json";
+
+/** Every mission's mission.json, unparsed. */
+export async function missionList(workspaceDir: string): Promise<string[]> {
+  return await invoke<string[]>("mission_list", { workspaceDir });
+}
+
+/** A mission file's text, empty when it does not exist yet. */
+export async function missionRead(workspaceDir: string, id: string, file: MissionFile): Promise<string> {
+  return await invoke<string>("mission_read", { workspaceDir, id, file });
+}
+
+export async function missionWrite(workspaceDir: string, id: string, file: MissionFile, text: string): Promise<void> {
+  await invoke("mission_write", { workspaceDir, id, file, text });
+}
+
+export async function missionPlanPath(workspaceDir: string, id: string): Promise<string> {
+  return await invoke<string>("mission_plan_path", { workspaceDir, id });
+}
+
+/** Saves `text` as the mission's request.md (planning) or check.md (integration check) and runs the agent at the
+ * workspace root, where every part's worktree is visible. Returns what the agent printed. */
+export async function missionAgent(
+  workspaceDir: string,
+  id: string,
+  command: string,
+  file: "request.md" | "check.md",
+  text: string,
+): Promise<string> {
+  return await invoke<string>("mission_agent", { workspaceDir, id, command, file, text });
+}
+
+/** The agent's .prdesk/notes.md in a worktree; empty when it wrote none. */
+export async function readAgentNotes(path: string, workspaceDir: string): Promise<string> {
+  return await invoke<string>("read_agent_notes", { path, workspaceDir });
 }
 
 export async function ptySpawn(cwd: string, command: string, rows: number, cols: number): Promise<number> {

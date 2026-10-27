@@ -103,6 +103,10 @@ export interface Thread {
   isOutdated: boolean;
   path: string;
   line: number | null;
+  /** Lines the thread covers on the PR head; absent when the thread is outdated. */
+  range?: { start: number; end: number };
+  /** The opening comment's ```suggestion replacement, while the thread is open. */
+  suggestion: string | null;
   diffHunk: string;
   comments: Comment[];
 }
@@ -138,6 +142,12 @@ export interface PullDetail {
   autoMergeAllowed: boolean;
   /** The viewer's default merge method for this repo: MERGE, SQUASH or REBASE. */
   mergeMethod: string;
+  /** The viewer's role on the repo: READ, TRIAGE, WRITE, MAINTAIN or ADMIN. */
+  permission: string;
+  labels: { name: string; color: string }[];
+  /** Every label the repo defines, for picking. */
+  repoLabels: string[];
+  assignees: string[];
   /** Node ids of people who already reviewed, for re-requesting their review. */
   reviewerIds: string[];
   checks: Check[];

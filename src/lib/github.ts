@@ -13,6 +13,7 @@ import type {
   Thread,
   ThreadSummary,
 } from "./model";
+import { applySuggestion, fromBase64, parseSuggestion, toBase64 } from "./suggestion";
 
 const PR_FIELDS = `
   ... on PullRequest {
@@ -40,7 +41,9 @@ const DETAIL_QUERY = `query($id: ID!) {
     ... on PullRequest {
       bodyHTML body mergeStateStatus additions deletions changedFiles mergeable
       autoMergeRequest { enabledAt }
-      repository { viewerDefaultMergeMethod autoMergeAllowed }
+      repository { viewerDefaultMergeMethod autoMergeAllowed viewerPermission labels(first: 100) { nodes { name } } }
+      labels(first: 20) { nodes { name color } }
+      assignees(first: 10) { nodes { login } }
       latestReviews(first: 20) { nodes { author { ... on User { id } } } }
       commits(last: 1) {
         nodes {
@@ -62,8 +65,8 @@ const DETAIL_QUERY = `query($id: ID!) {
       }
       reviewThreads(first: 100) {
         nodes {
-          id isResolved isOutdated path line originalLine
-          comments(first: 50) { nodes { id author { __typename login avatarUrl } bodyHTML createdAt diffHunk } }
+          id isResolved isOutdated path line originalLine startLine
+          comments(first: 50) { nodes { id author { __typename login avatarUrl } body bodyHTML createdAt diffHunk } }
         }
       }
       comments(first: 100) { nodes { id author { __typename login avatarUrl } bodyHTML createdAt } }
@@ -355,14 +358,22 @@ interface RawDetail {
         path: string;
         line: number | null;
         originalLine: number | null;
-        comments: { nodes: (RawComment & { diffHunk: string })[] };
+        startLine: number | null;
+        comments: { nodes: (RawComment & { body: string; diffHunk: string })[] };
       }[];
     };
     comments: { nodes: RawComment[] };
     reviews: { nodes: (Omit<RawComment, "createdAt"> & { state: string; submittedAt: string })[] };
     mergeable: string;
     autoMergeRequest: { enabledAt: string } | null;
-    repository: { viewerDefaultMergeMethod: string; autoMergeAllowed: boolean };
+    repository: {
+      viewerDefaultMergeMethod: string;
+      autoMergeAllowed: boolean;
+      viewerPermission: string | null;
+      labels: { nodes: { name: string }[] };
+    };
+    labels: { nodes: { name: string; color: string }[] };
+    assignees: { nodes: Login[] };
     latestReviews: { nodes: { author: { id?: string } | null }[] };
     commits: { nodes: { commit: { statusCheckRollup: { contexts: { nodes: RawContext[] } } | null } }[] };
   } | null;
@@ -426,6 +437,9 @@ export async function fetchDetail(config: Config, id: string): Promise<PullDetai
       isOutdated: t.isOutdated,
       path: t.path,
       line: t.line ?? t.originalLine,
+      // Outdated threads point at code that moved; a suggestion there can no longer be applied by line.
+      ...(t.isOutdated || t.line === null ? {} : { range: { start: t.startLine ?? t.line, end: t.line } }),
+      suggestion: t.isResolved ? null : parseSuggestion(t.comments.nodes[0]?.body ?? ""),
       diffHunk: t.comments.nodes[0]?.diffHunk ?? "",
       comments: t.comments.nodes.map(toComment),
     }),
@@ -449,6 +463,10 @@ export async function fetchDetail(config: Config, id: string): Promise<PullDetai
     autoMerge: node.autoMergeRequest !== null,
     autoMergeAllowed: node.repository.autoMergeAllowed,
     mergeMethod: node.repository.viewerDefaultMergeMethod,
+    permission: node.repository.viewerPermission ?? "READ",
+    labels: node.labels.nodes,
+    repoLabels: node.repository.labels.nodes.map((l): string => l.name),
+    assignees: node.assignees.nodes.map((a): string => a.login),
     reviewerIds: node.latestReviews.nodes.flatMap((r): string[] => (r.author?.id === undefined ? [] : [r.author.id])),
     checks: (node.commits.nodes[0]?.commit.statusCheckRollup?.contexts.nodes ?? []).map(toCheck),
   };
@@ -685,11 +703,19 @@ export async function createPull(
   return created.number;
 }
 
+export interface Deploy {
+  environment: string;
+  /** GitHub's DeploymentStatusState: SUCCESS, FAILURE, IN_PROGRESS, INACTIVE (superseded), … */
+  state: string;
+}
+
 export interface DailyItem {
   repo: string;
   number: number;
   title: string;
   url: string;
+  /** Latest deployment per environment of the merge commit; only for merged PRs. */
+  deploys: Deploy[];
 }
 
 export interface Daily {
@@ -699,17 +725,41 @@ export interface Daily {
 }
 
 const DAILY_FIELDS = "nodes { ... on PullRequest { number title url repository { nameWithOwner } } }";
+const MERGED_FIELDS = `nodes { ... on PullRequest {
+  number title url repository { nameWithOwner }
+  mergeCommit { deployments(first: 20, orderBy: { field: CREATED_AT, direction: DESC }) {
+    nodes { environment latestStatus { state } }
+  } }
+} }`;
+
+type RawDeploys = { nodes: { environment: string | null; latestStatus: { state: string } | null }[] };
+
+/** Newest deployment per environment, the order GitHub returned them in. */
+export function latestDeploys(raw: RawDeploys | undefined): Deploy[] {
+  const seen = new Map<string, Deploy>();
+  for (const d of raw?.nodes ?? []) {
+    if (d.environment === null || seen.has(d.environment)) continue;
+    seen.set(d.environment, { environment: d.environment, state: d.latestStatus?.state ?? "PENDING" });
+  }
+  return [...seen.values()];
+}
 
 /** What I shipped, opened and reviewed since `since` (a YYYY-MM-DD date), for the daily stand-up. */
 export async function fetchDaily(config: Config, since: string): Promise<Daily> {
   const query = `query($merged: String!, $opened: String!, $reviewed: String!) {
-    merged: search(query: $merged, type: ISSUE, first: 50) { ${DAILY_FIELDS} }
+    merged: search(query: $merged, type: ISSUE, first: 50) { ${MERGED_FIELDS} }
     opened: search(query: $opened, type: ISSUE, first: 50) { ${DAILY_FIELDS} }
     reviewed: search(query: $reviewed, type: ISSUE, first: 50) { ${DAILY_FIELDS} }
   }`;
   type Raw = {
     nodes: (
-      | { number: number; title: string; url: string; repository: { nameWithOwner: string } }
+      | {
+          number: number;
+          title: string;
+          url: string;
+          repository: { nameWithOwner: string };
+          mergeCommit?: { deployments: RawDeploys } | null;
+        }
       | Record<string, never>
     )[];
   };
@@ -720,7 +770,212 @@ export async function fetchDaily(config: Config, since: string): Promise<Daily> 
   });
   const items = (raw: Raw): DailyItem[] =>
     raw.nodes.flatMap((n): DailyItem[] =>
-      "number" in n ? [{ repo: n.repository.nameWithOwner, number: n.number, title: n.title, url: n.url }] : [],
+      "number" in n
+        ? [
+            {
+              repo: n.repository.nameWithOwner,
+              number: n.number,
+              title: n.title,
+              url: n.url,
+              deploys: latestDeploys(n.mergeCommit?.deployments),
+            },
+          ]
+        : [],
     );
   return { merged: items(data.merged), opened: items(data.opened), reviewed: items(data.reviewed) };
+}
+
+// The contents API path goes through Rust's REST guard, which only lets plain characters through.
+const PLAIN_PATH = /^[A-Za-z0-9/_.-]+$/;
+
+/** Commits a review suggestion to the PR branch, like GitHub's "Commit suggestion", then resolves the thread. */
+export async function commitSuggestion(config: Config, pr: PullRequest, thread: Thread): Promise<void> {
+  if (thread.range === undefined || thread.suggestion === null)
+    throw new Error("Esta sugestão não pode mais ser aplicada.");
+  if (!PLAIN_PATH.test(thread.path) || !PLAIN_PATH.test(pr.headRef))
+    throw new Error("O caminho ou a branch tem caracteres que o app não envia. Aplique pelo agente.");
+  const path = `/repos/${pr.repo}/contents/${thread.path}`;
+  const file = (await githubRest(config.apiUrl, "GET", `${path}?ref=${pr.headRef}`)) as {
+    content: string;
+    sha: string;
+  };
+  const next = applySuggestion(fromBase64(file.content), thread.range.start, thread.range.end, thread.suggestion);
+  const author = thread.comments[0]?.author ?? "";
+  await githubRest(config.apiUrl, "PUT", path, {
+    message: `Apply suggestion from @${author}`,
+    content: toBase64(next),
+    sha: file.sha,
+    branch: pr.headRef,
+  });
+  await resolveThread(config, thread.id);
+}
+
+/** Replaces the PR's labels (an issue field on GitHub). */
+export async function setLabels(config: Config, pr: PullRequest, labels: string[]): Promise<void> {
+  await githubRest(config.apiUrl, "PATCH", `/repos/${pr.repo}/issues/${pr.number}`, { labels });
+}
+
+export async function setAssignees(config: Config, pr: PullRequest, assignees: string[]): Promise<void> {
+  await githubRest(config.apiUrl, "PATCH", `/repos/${pr.repo}/issues/${pr.number}`, { assignees });
+}
+
+export async function closePull(config: Config, pr: PullRequest): Promise<void> {
+  await githubRest(config.apiUrl, "PATCH", repoPath(pr), { state: "closed" });
+}
+
+/** A branch I pushed recently that never had a PR. */
+export interface StrayBranch {
+  repo: string;
+  branch: string;
+  pushedAt: string;
+  /** Headline of its latest commit, the natural first title. */
+  subject: string;
+}
+
+/** A default branch whose latest commit fails CI: why everyone's PRs might be red. */
+export interface BrokenBase {
+  repo: string;
+  branch: string;
+  url: string;
+}
+
+export interface Radar {
+  branches: StrayBranch[];
+  broken: BrokenBase[];
+}
+
+export interface RawRepoRadar {
+  nameWithOwner: string;
+  defaultBranchRef: { name: string; target: { url?: string; statusCheckRollup?: { state: string } | null } } | null;
+  refs: {
+    nodes: {
+      name: string;
+      associatedPullRequests: { totalCount: number };
+      target: { committedDate?: string; messageHeadline?: string; author?: { user: Login | null } | null };
+    }[];
+  };
+}
+
+// ponytail: 30 repos × 25 newest branches in one query; a branch pushed to a quieter repo or older than that is missed.
+const RADAR_REPOS = 30;
+const RADAR_REFS = 25;
+const STRAY_DAYS = 14;
+const DAY_MS = 86_400_000;
+
+const RADAR_FIELDS = `
+  nameWithOwner
+  defaultBranchRef { name target { ... on Commit { url statusCheckRollup { state } } } }
+  refs(refPrefix: "refs/heads/", first: ${RADAR_REFS}, orderBy: { field: TAG_COMMIT_DATE, direction: DESC }) {
+    nodes {
+      name
+      associatedPullRequests(first: 1) { totalCount }
+      target { ... on Commit { committedDate messageHeadline author { user { login } } } }
+    }
+  }`;
+
+export function readRadar(repos: (RawRepoRadar | null)[], me: string, now: number): Radar {
+  const radar: Radar = { branches: [], broken: [] };
+  for (const r of repos) {
+    if (r === null) continue;
+    const base = r.defaultBranchRef;
+    const state = base?.target.statusCheckRollup?.state;
+    if (base !== null && (state === "FAILURE" || state === "ERROR"))
+      radar.broken.push({ repo: r.nameWithOwner, branch: base.name, url: base.target.url ?? "" });
+    for (const ref of r.refs.nodes) {
+      const at = ref.target.committedDate;
+      if (ref.name === base?.name || ref.associatedPullRequests.totalCount > 0 || at === undefined) continue;
+      if (ref.target.author?.user?.login !== me || now - Date.parse(at) > STRAY_DAYS * DAY_MS) continue;
+      radar.branches.push({
+        repo: r.nameWithOwner,
+        branch: ref.name,
+        pushedAt: at,
+        subject: ref.target.messageHeadline ?? "",
+      });
+    }
+  }
+  radar.branches.sort((a, b): number => Date.parse(b.pushedAt) - Date.parse(a.pushedAt));
+  return radar;
+}
+
+/** Branches without a PR and red default branches across `repos` (busiest first), in one aliased query. */
+export async function fetchRadar(config: Config, repos: string[], me: string): Promise<Radar> {
+  const picked = repos.slice(0, RADAR_REPOS);
+  if (picked.length === 0) return { branches: [], broken: [] };
+  const vars: Record<string, string> = {};
+  const params: string[] = [];
+  const fields = picked.map((full, i): string => {
+    const [owner = "", name = ""] = full.split("/");
+    vars[`o${i}`] = owner;
+    vars[`n${i}`] = name;
+    params.push(`$o${i}: String!, $n${i}: String!`);
+    return `r${i}: repository(owner: $o${i}, name: $n${i}) { ${RADAR_FIELDS} }`;
+  });
+  const data: Record<string, RawRepoRadar | null> = await githubGraphql(
+    config.apiUrl,
+    `query(${params.join(", ")}) { ${fields.join("\n")} }`,
+    vars,
+  );
+  return readRadar(Object.values(data), me, Date.now());
+}
+
+export interface Issue {
+  id: string;
+  repo: string;
+  repoUrl: string;
+  number: number;
+  title: string;
+  url: string;
+  body: string;
+  updatedAt: string;
+  labels: string[];
+}
+
+const ISSUES_QUERY = `query($q: String!) {
+  search(query: $q, type: ISSUE, first: 50) {
+    nodes {
+      ... on Issue {
+        id number title url body updatedAt
+        repository { nameWithOwner url }
+        labels(first: 5) { nodes { name } }
+      }
+    }
+  }
+}`;
+
+/** Open issues assigned to me, newest activity first. */
+export async function fetchIssues(config: Config): Promise<Issue[]> {
+  type Raw = {
+    id: string;
+    number: number;
+    title: string;
+    url: string;
+    body: string;
+    updatedAt: string;
+    repository: { nameWithOwner: string; url: string };
+    labels: { nodes: { name: string }[] };
+  };
+  const data: { search: { nodes: (Raw | Record<string, never>)[] } } = await githubGraphql(
+    config.apiUrl,
+    ISSUES_QUERY,
+    {
+      q: "is:issue is:open archived:false assignee:@me sort:updated-desc",
+    },
+  );
+  return data.search.nodes.flatMap((n): Issue[] =>
+    "id" in n
+      ? [
+          {
+            id: n.id,
+            repo: n.repository.nameWithOwner,
+            repoUrl: n.repository.url,
+            number: n.number,
+            title: n.title,
+            url: n.url,
+            body: n.body,
+            updatedAt: n.updatedAt,
+            labels: n.labels.nodes.map((l): string => l.name),
+          },
+        ]
+      : [],
+  );
 }

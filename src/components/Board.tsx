@@ -8,6 +8,7 @@ import { age } from "../lib/format";
 import { DEFAULT_LAYOUT, gridTemplate, type LaneLayout, moveLane, normalizeLayout, resizePair } from "../lib/lanes";
 import { COLUMN_HINT, COLUMN_LABEL, COLUMNS, type Column, type PullRequest, type TriagedPull } from "../lib/model";
 import { loadValue, saveValue } from "../lib/persist";
+import { blockers } from "./Daily";
 
 const EMPTY: Record<Column, string> = {
   myTurn: "Tudo em dia. Nada esperando por você.",
@@ -55,6 +56,9 @@ function Flags({ item, agent }: { item: TriagedPull; agent: AgentState | undefin
   if (pr.ciState === "FAILURE" || pr.ciState === "ERROR") flags.push({ text: "CI falhou", tone: "bad" });
   if (pr.isDraft) flags.push({ text: "Rascunho", tone: "dim" });
   if (pr.reviewDecision === "APPROVED") flags.push({ text: "Aprovada", tone: "good" });
+  // Only my PRs sit in "Aguardando"; days without a review there are worth a nudge (the PR's next step).
+  if (item.triage.column === "waiting" && blockers([item], Date.now()).length > 0)
+    flags.push({ text: `Parada há ${age(item.triage.at ?? pr.updatedAt)}`, tone: "warn" });
   if (flags.length === 0) return null;
   return (
     <span className="flags">

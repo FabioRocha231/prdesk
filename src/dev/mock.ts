@@ -18,7 +18,16 @@ interface Seed {
   reviews?: [string, string, number][];
   body?: string;
   mergeState?: string;
-  threads?: { resolved?: boolean; first: string; last: string; hoursAgo: number; text: string; opening?: string }[];
+  threads?: {
+    resolved?: boolean;
+    first: string;
+    last: string;
+    hoursAgo: number;
+    text: string;
+    opening?: string;
+    /** A ```suggestion block in the opening comment. */
+    suggest?: string;
+  }[];
 }
 
 const SEEDS: Seed[] = [
@@ -65,6 +74,7 @@ const SEEDS: Seed[] = [
         last: "joao",
         hoursAgo: 3,
         text: "Nit: name this refreshAndRetry so the call sites read better.",
+        suggest: "export async function refreshAndRetry(path: string, init: RequestInit) {",
       },
     ],
   },
@@ -236,6 +246,10 @@ function detail(id: string): Record<string, unknown> {
         {
           id: `C${i}a`,
           author: { __typename: "User", login: t.first },
+          body:
+            t.suggest === undefined
+              ? (t.opening ?? t.text)
+              : `${t.opening ?? t.text}\n\n\`\`\`suggestion\n${t.suggest}\n\`\`\``,
           bodyHTML: `<p>${t.opening ?? t.text}</p>`,
           createdAt: ago(t.hoursAgo + 1),
           diffHunk: HUNK,
@@ -350,7 +364,14 @@ function detail(id: string): Record<string, unknown> {
       reviews: { nodes: [] },
       mergeable: seed?.mergeState === "DIRTY" ? "CONFLICTING" : "MERGEABLE",
       autoMergeRequest: null,
-      repository: { viewerDefaultMergeMethod: "SQUASH", autoMergeAllowed: true },
+      repository: {
+        viewerDefaultMergeMethod: "SQUASH",
+        autoMergeAllowed: true,
+        viewerPermission: "WRITE",
+        labels: { nodes: [{ name: "bug" }, { name: "enhancement" }, { name: "needs-qa" }] },
+      },
+      labels: { nodes: [{ name: "enhancement", color: "a2eeef" }] },
+      assignees: { nodes: seed?.author === undefined ? [] : [{ login: seed.author }] },
       latestReviews: { nodes: [{ author: { id: "U_maria" } }] },
       commits: {
         nodes: [
@@ -518,6 +539,8 @@ function mockAgent(context: string): string {
 export function installMocks(): void {
   mockWindows("main");
   let nextId = 1;
+  // Mission files in memory, keyed "id/file".
+  const missionFiles = new Map<string, string>();
   mockIPC((cmd, payload) => {
     const args = (payload ?? {}) as Record<string, unknown>;
     switch (cmd) {
@@ -555,6 +578,74 @@ export function installMocks(): void {
             reviewed: { nodes: [item(311, "acme/api", "Rate limit the public search endpoint per API key")] },
           };
         }
+        if (query.includes("pullRequest(number")) {
+          const v = args.variables as { owner: string; name: string; number: number };
+          const repo = `${v.owner}/${v.name}`;
+          const seed = SEEDS.find((x) => x.repo === repo && x.n === v.number);
+          return {
+            repository: {
+              pullRequest: {
+                state: "OPEN",
+                ...rawPull(
+                  seed ?? { n: v.number, repo, title: `Mission PR ${repo}#${v.number}`, author: ME, draft: true },
+                ),
+              },
+            },
+          };
+        }
+        if (query.includes("refPrefix")) {
+          const vars = args.variables as Record<string, string>;
+          const repos = Object.keys(vars).filter((k) => k.startsWith("o"));
+          return Object.fromEntries(
+            repos.map((k, i) => {
+              const full = `${vars[k]}/${vars[`n${k.slice(1)}`]}`;
+              const commit = (name: string, hours: number, login = ME) => ({
+                name,
+                associatedPullRequests: { totalCount: 0 },
+                target: { committedDate: ago(hours), messageHeadline: `wip: ${name}`, author: { user: { login } } },
+              });
+              return [
+                `r${i}`,
+                {
+                  nameWithOwner: full,
+                  defaultBranchRef: {
+                    name: "main",
+                    target: {
+                      url: `https://github.com/${full}/commit/abc123`,
+                      statusCheckRollup: { state: full === "acme/web" ? "FAILURE" : "SUCCESS" },
+                    },
+                  },
+                  refs: {
+                    nodes:
+                      full === "acme/api"
+                        ? [commit("feat/rate-limit-headers", 3), commit("chore/bump", 1, "maria")]
+                        : [],
+                  },
+                },
+              ];
+            }),
+          );
+        }
+        if (query.includes("... on Issue")) {
+          const issue = (n: number, repo: string, title: string, labels: string[]) => ({
+            id: `I_${repo}_${n}`,
+            number: n,
+            title,
+            url: `https://github.com/${repo}/issues/${n}`,
+            body: `${title}.\n\nSteps to reproduce in the linked Sentry event.`,
+            updatedAt: ago(n % 30),
+            repository: { nameWithOwner: repo, url: `https://github.com/${repo}` },
+            labels: { nodes: labels.map((name) => ({ name })) },
+          });
+          return {
+            search: {
+              nodes: [
+                issue(512, "acme/api", "Webhook retries ignore the Retry-After header", ["bug"]),
+                issue(77, "acme/web", "Show the order number on the payment receipt", ["enhancement"]),
+              ],
+            },
+          };
+        }
         if (query.includes("nodes(ids")) {
           const ids = (args.variables as { ids: string[] }).ids;
           return { nodes: ids.map((id) => SEEDS.map(rawPull).find((p) => p.id === id) ?? null) };
@@ -573,6 +664,10 @@ export function installMocks(): void {
       case "github_rest": {
         const path = String(args.path);
         if (String(args.method) === "GET" && path.includes("/files")) return MOCK_FILES;
+        if (String(args.method) === "POST" && path.endsWith("/pulls")) return { number: 900 + nextId++ };
+        if (String(args.method) === "GET" && /^\/repos\/[^/]+\/[^/]+$/.test(path)) return { default_branch: "main" };
+        if (String(args.method) === "GET" && path.includes("/contents/"))
+          return { sha: "f1le", content: btoa(Array.from({ length: 80 }, (_, i) => `line ${i + 1}`).join("\n")) };
         return {};
       }
       case "agent_run":
@@ -596,8 +691,43 @@ export function installMocks(): void {
         return mockGraph(`origin/pr/${(args.req as { number: number }).number}`);
       case "plugin:dialog|open":
         return "/Users/you/Projects/ggcheckout-environment";
-      case "prepare_branch":
-        return "/Users/you/PRDesk/acme/web-prdesk-task";
+      case "prepare_branch": {
+        const req = args.req as { owner: string; repo: string; branch: string };
+        return `/Users/you/PRDesk/${req.owner}/${req.repo}-${req.branch.replace(/[^A-Za-z0-9_-]/g, "-")}`;
+      }
+      case "mission_list":
+        return [...missionFiles].filter(([k]) => k.endsWith("/mission.json")).map(([, v]) => v);
+      case "mission_read":
+        return missionFiles.get(`${String(args.id)}/${String(args.file)}`) ?? "";
+      case "mission_write":
+        missionFiles.set(`${String(args.id)}/${String(args.file)}`, String(args.text));
+        return null;
+      case "mission_plan_path":
+        return `/Users/you/PRDesk/missions/${String(args.id)}/plan.md`;
+      case "read_agent_notes":
+        return String(args.path).includes("/web-")
+          ? "Serializer lido.\n\n## CONTRACT CHANGE\n`orderNumber` precisa ser `number`: o banco já guarda como inteiro.\n"
+          : "";
+      case "mission_agent": {
+        if (String(args.file) === "check.md")
+          return "- **acme/web** lê `orderNumber` como `number`, mas o contrato diz `string`.\n- O resto bate com o contrato.";
+        const repos = [...String(args.text).matchAll(/^- ([\w.-]+\/[\w.-]+):/gm)].map((m) => m[1]);
+        return [
+          "# Número do pedido no recibo",
+          "",
+          "## Contrato",
+          "",
+          "- `GET /orders/:id` passa a devolver `orderNumber: string` no formato `PED-000123`.",
+          "",
+          ...repos.flatMap((r, i) => [
+            `## ${r}`,
+            ...(i > 0 ? [`Depende de: ${repos[0]}`] : []),
+            "",
+            i === 0 ? "Adicionar `orderNumber` ao serializer e à migração." : "Mostrar `orderNumber` no recibo.",
+            "",
+          ]),
+        ].join("\n");
+      }
       case "write_agent_context":
         return null;
       case "prepare_worktree":

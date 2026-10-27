@@ -14,6 +14,8 @@ const base: StepInput = {
   drafts: 0,
   approved: false,
   onFilesTab: false,
+  rereview: false,
+  stale: false,
 };
 
 describe("nextStep", () => {
@@ -25,6 +27,14 @@ describe("nextStep", () => {
     expect(nextStep({ ...base, draft: true })).toBe("ready");
     expect(nextStep({ ...base, behind: true })).toBe("update-branch");
     expect(nextStep(base)).toBeNull();
+  });
+
+  it("on my PR, asks reviewers to come back", () => {
+    expect(nextStep({ ...base, pending: 1, rereview: true })).toBe("autopilot");
+    expect(nextStep({ ...base, rereview: true })).toBe("rereview");
+    expect(nextStep({ ...base, rereview: true, draft: true })).toBe("ready");
+    expect(nextStep({ ...base, stale: true, behind: true })).toBe("update-branch");
+    expect(nextStep({ ...base, stale: true })).toBe("nudge");
   });
 
   it("on someone else's PR, leads to the review", () => {

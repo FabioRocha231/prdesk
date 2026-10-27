@@ -1,5 +1,6 @@
 import {
   ArrowUpRight,
+  BellRing,
   Bot,
   Check,
   Clock,
@@ -13,9 +14,12 @@ import {
   Send,
   Sparkles,
   Swords,
+  Tag,
+  UserCog,
   UserPlus,
   UserRoundCheck,
   Wand2,
+  XCircle,
 } from "lucide-react";
 import type { ReactElement } from "react";
 import { useEffect, useState } from "react";
@@ -27,6 +31,7 @@ import { age } from "../lib/format";
 import {
   addComment,
   approve,
+  closePull,
   convertToDraft,
   disableAutoMerge,
   editPull,
@@ -35,6 +40,8 @@ import {
   merge,
   requestReviewers,
   requestReviews,
+  setAssignees,
+  setLabels,
   updateBranch,
 } from "../lib/github";
 import { rerunFailedJobs, saveCiLog } from "../lib/ipc";
@@ -50,11 +57,12 @@ import { type NextStep, nextStep } from "../lib/nextStep";
 import { transitionName } from "./Board";
 import { ChangesTab } from "./Changes";
 import { ChecksTab, failedRunIds } from "./Checks";
+import { blockers } from "./Daily";
 import { PrTree } from "./GitTree";
 import { Html } from "./Html";
 import { Menu, type MenuItem } from "./Menu";
 import { type AiState, ReviewTab } from "./Review";
-import { CommentView, htmlToText, isBotThread, type ReplyDrafter, ThreadsTab, waitsOnMe } from "./Threads";
+import { CommentView, htmlToText, isBotThread, PUSH_ROLES, type ReplyDrafter, ThreadsTab, waitsOnMe } from "./Threads";
 import { useAction } from "./useAction";
 
 // A merge is the one irreversible click here, so it takes a second click within this window.
@@ -88,6 +96,30 @@ const REVIEW_NOTE: Record<string, string> = {
 };
 
 const MERGE_LABEL: Record<string, string> = { SQUASH: "squash", REBASE: "rebase", MERGE: "merge commit" };
+
+// Labels and assignees need at least triage access; GitHub rejects the edit below that.
+const TRIAGE_ROLES = new Set(["TRIAGE", ...PUSH_ROLES]);
+
+/** The inline list editors under the action bar: who reviews, which labels, who is assigned. */
+type ListEdit = "reviewers" | "labels" | "assignees";
+
+const LIST_EDIT: Record<ListEdit, { label: string; placeholder: string; submit: string }> = {
+  reviewers: { label: "Logins de quem deve revisar", placeholder: "@login, @outro", submit: "Pedir review" },
+  labels: { label: "Labels da PR, separadas por vírgula", placeholder: "bug, needs-qa", submit: "Salvar labels" },
+  assignees: { label: "Responsáveis pela PR", placeholder: "@login, @outro", submit: "Salvar responsáveis" },
+};
+
+const logins = (text: string): string[] =>
+  text
+    .split(/[\s,]+/)
+    .map((l): string => l.replace(/^@/, ""))
+    .filter((l): boolean => /^[A-Za-z0-9-]+$/.test(l));
+
+const labelList = (text: string): string[] =>
+  text
+    .split(",")
+    .map((l): string => l.trim())
+    .filter(Boolean);
 
 function ConversationTab({
   config,
@@ -312,9 +344,9 @@ function ActionBar({
   extra: MenuItem[];
 }): ReactElement {
   const action = useAction();
-  const [confirmMerge, setConfirmMerge] = useState(false);
-  const [asking, setAsking] = useState(false);
-  const [logins, setLogins] = useState("");
+  const [confirm, setConfirm] = useState<"merge" | "close" | null>(null);
+  const [editing, setEditing] = useState<ListEdit | null>(null);
+  const [listText, setListText] = useState("");
   const { pr } = item;
   const mine = pr.author === me;
   const closed = pr.closed !== undefined;
@@ -325,12 +357,31 @@ function ActionBar({
   const iApproved = pr.reviews.some((r): boolean => r.author === me && r.state === "APPROVED");
   const mergeReady = mine && pr.reviewDecision === "APPROVED" && !pr.isDraft && detail?.mergeable === "MERGEABLE";
   const mergeLabel = MERGE_LABEL[detail?.mergeMethod ?? ""] ?? detail?.mergeMethod ?? "";
+  // Changes were requested, I pushed after them, and the reviewer has not been asked to look again.
+  const rereview = pr.reviews.some(
+    (r): boolean =>
+      r.state === "CHANGES_REQUESTED" &&
+      pr.lastCommitAt !== null &&
+      Date.parse(pr.lastCommitAt) > Date.parse(r.submittedAt) &&
+      !pr.requestedReviewers.includes(r.author),
+  );
+  const nudgeable = pr.requestedReviewers.filter((l): boolean => l !== me);
+  const stale =
+    mine && item.triage.column === "waiting" && nudgeable.length > 0 && blockers([item], Date.now()).length > 0;
+  const nudgeText = `${nudgeable.map((l): string => `@${l}`).join(" ")}, consegue dar uma olhada nesta PR quando puder?`;
 
   useEffect((): (() => void) | undefined => {
-    if (!confirmMerge) return undefined;
-    const timer = window.setTimeout((): void => setConfirmMerge(false), CONFIRM_WINDOW_MS);
+    if (confirm === null) return undefined;
+    const timer = window.setTimeout((): void => setConfirm(null), CONFIRM_WINDOW_MS);
     return (): void => window.clearTimeout(timer);
-  }, [confirmMerge]);
+  }, [confirm]);
+
+  const startEdit = (kind: ListEdit): void => {
+    setEditing(kind);
+    if (kind === "labels") setListText(detail?.labels.map((l): string => l.name).join(", ") ?? "");
+    else if (kind === "assignees") setListText(detail?.assignees.map((l): string => `@${l}`).join(", ") ?? "");
+    else setListText("");
+  };
 
   const act = (key: string, fn: () => Promise<void>): void => {
     void (async (): Promise<void> => {
@@ -401,7 +452,7 @@ function ActionBar({
       label: `Merge (${mergeLabel})`,
       icon: <GitMerge size={15} strokeWidth={2} aria-hidden />,
       tone: "good",
-      run: (): void => setConfirmMerge(true),
+      run: (): void => setConfirm("merge"),
     },
     ready: {
       key: "ready",
@@ -415,6 +466,20 @@ function ActionBar({
       label: "Atualizar branch",
       icon: <RefreshCcw size={15} strokeWidth={2} aria-hidden />,
       run: (): void => act("update-branch", async (): Promise<void> => await updateBranch(config, pr)),
+    },
+    rereview: {
+      key: "rereview",
+      label: "Pedir novo review",
+      icon: <UserRoundCheck size={15} strokeWidth={2} aria-hidden />,
+      tone: "accent",
+      run: (): void =>
+        act("rereview", async (): Promise<void> => await requestReviews(config, pr.id, detail?.reviewerIds ?? [])),
+    },
+    nudge: {
+      key: "nudge",
+      label: `Cutucar ${nudgeable.map((l): string => `@${l}`).join(", ")}`,
+      icon: <BellRing size={15} strokeWidth={2} aria-hidden />,
+      run: (): void => act("nudge", async (): Promise<void> => await addComment(config, pr.id, nudgeText)),
     },
   };
 
@@ -430,6 +495,8 @@ function ActionBar({
     drafts,
     approved: iApproved,
     onFilesTab,
+    rereview: rereview && (detail?.reviewerIds.length ?? 0) > 0,
+    stale,
   });
   const primary = step === null ? null : actions[step];
 
@@ -491,21 +558,29 @@ function ActionBar({
         icon: <GitPullRequestDraft size={15} strokeWidth={2} aria-hidden />,
         run: (): void => act("to-draft", async (): Promise<void> => await convertToDraft(config, pr.id)),
       });
-    if (mine && detail.reviewerIds.length > 0 && pr.reviewDecision !== "APPROVED")
-      add("people", {
-        key: "rereview",
-        label: "Pedir novo review",
-        icon: <UserRoundCheck size={15} strokeWidth={2} aria-hidden />,
-        run: (): void =>
-          act("rereview", async (): Promise<void> => await requestReviews(config, pr.id, detail.reviewerIds)),
-      });
+    if (mine && detail.reviewerIds.length > 0 && pr.reviewDecision !== "APPROVED") add("people", actions.rereview);
     if (mine)
       add("people", {
         key: "ask",
         label: "Pedir review de alguém…",
         icon: <UserPlus size={15} strokeWidth={2} aria-hidden />,
-        run: (): void => setAsking(true),
+        run: (): void => startEdit("reviewers"),
       });
+    if (mine && nudgeable.length > 0) add("people", actions.nudge);
+    if (TRIAGE_ROLES.has(detail.permission)) {
+      add("people", {
+        key: "assignees",
+        label: "Responsáveis…",
+        icon: <UserCog size={15} strokeWidth={2} aria-hidden />,
+        run: (): void => startEdit("assignees"),
+      });
+      add("people", {
+        key: "labels",
+        label: "Labels…",
+        icon: <Tag size={15} strokeWidth={2} aria-hidden />,
+        run: (): void => startEdit("labels"),
+      });
+    }
     if (runs.length > 0)
       add("pr", {
         key: "rerun",
@@ -530,6 +605,14 @@ function ActionBar({
     add("later", { key: "monday", label: "Adiar até segunda, 9h", icon: clock, run: (): void => onSnooze("monday") });
     add("later", { key: "change", label: "Adiar até ela mudar", icon: clock, run: (): void => onSnooze("change") });
   }
+  if (!closed && (mine || PUSH_ROLES.has(detail?.permission ?? "")))
+    add("close", {
+      key: "close",
+      label: "Fechar sem mergear",
+      icon: <XCircle size={15} strokeWidth={2} aria-hidden />,
+      tone: "danger",
+      run: (): void => setConfirm("close"),
+    });
   menu.push(...extra);
   add("out", {
     key: "github",
@@ -538,24 +621,46 @@ function ActionBar({
     run: onOpenGithub,
   });
 
-  const names = logins
-    .split(/[\s,]+/)
-    .map((l): string => l.replace(/^@/, ""))
-    .filter((l): boolean => /^[A-Za-z0-9-]+$/.test(l));
+  const entries = editing === "labels" ? labelList(listText) : logins(listText);
+  // Saving an empty label or assignee list clears it; an empty review request does nothing.
+  const canSave = editing !== "reviewers" || entries.length > 0;
+  const saveList = (): void => {
+    if (editing === null || !canSave) return;
+    const kind = editing;
+    act(kind, async (): Promise<void> => {
+      if (kind === "reviewers") await requestReviewers(config, pr, entries);
+      else if (kind === "labels") await setLabels(config, pr, entries);
+      else await setAssignees(config, pr, entries);
+      setEditing(null);
+      setListText("");
+    });
+  };
 
   return (
     <div className="action-bar">
-      {confirmMerge && detail !== null ? (
+      {confirm === "merge" && detail !== null ? (
         <button
           type="button"
           className="step-button danger"
           disabled={action.pending !== null}
           onClick={(): void => {
-            setConfirmMerge(false);
+            setConfirm(null);
             act("merge", async (): Promise<void> => await merge(config, pr.id, detail.mergeMethod));
           }}
         >
           <GitMerge size={15} strokeWidth={2} aria-hidden /> Confirmar merge ({mergeLabel})?
+        </button>
+      ) : confirm === "close" ? (
+        <button
+          type="button"
+          className="step-button danger"
+          disabled={action.pending !== null}
+          onClick={(): void => {
+            setConfirm(null);
+            act("close", async (): Promise<void> => await closePull(config, pr));
+          }}
+        >
+          <XCircle size={15} strokeWidth={2} aria-hidden /> Confirmar: fechar sem mergear?
         </button>
       ) : (
         primary !== null && (
@@ -571,33 +676,42 @@ function ActionBar({
         )
       )}
       <Menu label="Mais" items={menu} />
-      {asking && (
+      {editing !== null && (
         <form
           className="ask-review"
           onSubmit={(e): void => {
             e.preventDefault();
-            if (names.length === 0) return;
-            act("ask", async (): Promise<void> => {
-              await requestReviewers(config, pr, names);
-              setAsking(false);
-              setLogins("");
-            });
+            saveList();
           }}
         >
           <input
             className="input"
             // biome-ignore lint/a11y/noAutofocus: opens on an explicit menu choice
             autoFocus
-            aria-label="Logins de quem deve revisar"
-            placeholder="@login, @outro"
-            value={logins}
-            onChange={(e): void => setLogins(e.target.value)}
+            aria-label={LIST_EDIT[editing].label}
+            placeholder={LIST_EDIT[editing].placeholder}
+            {...(editing === "labels" ? { list: "repo-labels" } : {})}
+            value={listText}
+            onChange={(e): void => setListText(e.target.value)}
             onKeyDown={(e): void => {
-              if (e.key === "Escape") setAsking(false);
+              if (e.key === "Escape") setEditing(null);
             }}
           />
-          <button type="submit" className="button small" disabled={names.length === 0 || action.pending !== null}>
-            {action.pending === "ask" ? "Pedindo…" : "Pedir review"}
+          {editing === "labels" && (
+            <datalist id="repo-labels">
+              {(detail?.repoLabels ?? []).map(
+                (l): ReactElement => (
+                  // Offers each label appended to what is already typed, so a comma list still autocompletes.
+                  <option
+                    key={l}
+                    value={listText.includes(",") ? `${listText.replace(/[^,]*$/, " ").trimEnd()} ${l}` : l}
+                  />
+                ),
+              )}
+            </datalist>
+          )}
+          <button type="submit" className="button small" disabled={!canSave || action.pending !== null}>
+            {action.pending === editing ? "Salvando…" : LIST_EDIT[editing].submit}
           </button>
         </form>
       )}
@@ -817,6 +931,13 @@ export function Detail({
           <span className="dhead-branch">
             {pr.author ?? "ghost"} → {pr.headRef}
           </span>
+          {detail?.labels.map(
+            (l): ReactElement => (
+              <span key={l.name} className="dhead-label" style={{ ["--label" as string]: `#${l.color}` }}>
+                {l.name}
+              </span>
+            ),
+          )}
           {detail !== null && (
             <span className="dhead-stats">
               <b className="tone-add">+{detail.additions}</b>

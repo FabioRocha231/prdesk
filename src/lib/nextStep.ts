@@ -7,6 +7,8 @@ export type NextStep =
   | "merge"
   | "ready"
   | "update-branch"
+  | "rereview"
+  | "nudge"
   | null;
 
 export interface StepInput {
@@ -25,6 +27,10 @@ export interface StepInput {
   /** I already approved this one. */
   approved: boolean;
   onFilesTab: boolean;
+  /** Someone requested changes, I pushed since, and they were not asked to look again. */
+  rereview: boolean;
+  /** Waiting on requested reviewers for days. */
+  stale: boolean;
 }
 
 /** One obvious next action per PR; everything else lives in the "Mais" menu. */
@@ -36,8 +42,9 @@ export function nextStep(s: StepInput): NextStep {
   }
   if (s.conflicting) return "conflicts";
   if (s.pending > 0) return "autopilot";
+  if (s.rereview && !s.draft) return "rereview";
   if (s.mergeReady && !s.blocked) return "merge";
   if (s.draft) return "ready";
   if (s.behind) return "update-branch";
-  return null;
+  return s.stale ? "nudge" : null;
 }

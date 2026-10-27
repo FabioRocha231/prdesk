@@ -262,12 +262,22 @@ kbd {
   grid-template-columns: minmax(300px, 3fr) minmax(0, 9fr);
 }
 
-.main:has(> .tasks-strip) {
+.main:has(> .strips) {
   grid-template-rows: auto minmax(0, 1fr);
 }
 
+/* Tasks, radar and the repo filter share one wrapping row; the filter sits at its right end. */
+.strips {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 0 24px;
+  padding: 14px var(--gutter) 0;
+}
+
+/* --dock is the height the user dragged the terminal to; until then it takes 46% of the window. */
 .main.is-detail.has-dock {
-  grid-template-rows: minmax(220px, 1fr) minmax(300px, 46%);
+  grid-template-rows: minmax(220px, 1fr) var(--dock, minmax(300px, 46%));
 }
 
 /* ───── Board ───── */
@@ -988,6 +998,26 @@ button.chain-node:hover {
   font-family: var(--mono);
 }
 
+/* GitHub's label colour, toned down to a border and dot so arbitrary colours stay readable on the dark deck. */
+.dhead-label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 2px 8px;
+  border: 1px solid color-mix(in srgb, var(--label) 55%, transparent);
+  border-radius: 999px;
+  font-size: 0.75rem;
+  color: var(--text);
+}
+
+.dhead-label::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--label);
+}
+
 .dhead-stats {
   margin-left: auto;
   display: inline-flex;
@@ -1677,9 +1707,26 @@ button.chain-node:hover {
   display: grid;
   grid-template-columns: minmax(0, 1fr);
   grid-template-rows: auto minmax(0, 1fr);
+  position: relative;
   background: var(--term-bg);
   color: var(--term-ink);
   border-top: 1px solid color-mix(in srgb, var(--cyan) 45%, transparent);
+}
+
+/* A thin strip over the dock's top border: drag it (or focus it and use the arrows) to resize the terminal. */
+.dock-grip {
+  position: absolute;
+  inset: -4px 0 auto;
+  height: 8px;
+  z-index: 2;
+  cursor: row-resize;
+}
+
+.dock-grip:hover,
+.dock-grip:focus-visible,
+.dock-grip.is-dragging {
+  background: color-mix(in srgb, var(--cyan) 35%, transparent);
+  outline: none;
 }
 
 .dock[hidden] {
@@ -1730,11 +1777,13 @@ button.chain-node:hover {
 .term-host {
   min-height: 0;
   overflow: hidden;
-  padding: 10px 0 8px var(--gutter);
 }
 
+/* The padding sits on .xterm, not the host: FitAddon subtracts the terminal's own padding but reads the host's
+   border-box height, so padding there made it fit rows and columns that were then cut off. */
 .term-host .xterm {
   height: 100%;
+  padding: 10px 0 8px var(--gutter);
 }
 
 .term-state {
@@ -2066,6 +2115,10 @@ textarea.input {
 
 .link-button.accent {
   color: var(--cyan);
+}
+
+.link-button.good {
+  color: var(--good);
 }
 
 .link-button:disabled {
@@ -2969,7 +3022,6 @@ textarea.input {
   flex-wrap: wrap;
   align-items: center;
   gap: 8px;
-  padding: 14px var(--gutter) 0;
 }
 
 .tasks-label {
@@ -2991,6 +3043,130 @@ textarea.input {
 
 .task-chip:hover {
   border-color: var(--cyan);
+}
+
+.task-chip.is-bad {
+  border-color: color-mix(in srgb, var(--hot) 45%, transparent);
+  color: var(--hot);
+}
+
+.task-chip.is-bad:hover {
+  border-color: var(--hot);
+}
+
+.issue-row {
+  display: flex;
+  align-items: center;
+  padding-right: 8px;
+  border-bottom: 1px solid var(--line);
+}
+
+.issue-row .feed-item {
+  grid-template-columns: 10px minmax(0, 1fr) auto auto;
+  border-bottom: 0;
+  opacity: 1;
+}
+
+.issue-start {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font: 600 0.75rem / 1 var(--font);
+  color: var(--cyan);
+  opacity: 0;
+  transition: opacity 140ms ease-out;
+}
+
+.issue-row .feed-item:hover .issue-start,
+.issue-row .feed-item:focus-visible .issue-start {
+  opacity: 1;
+}
+
+.repo-filter {
+  margin-left: auto;
+}
+
+.repo-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  padding: 7px 12px;
+  background: var(--deck);
+  border: 1px solid var(--line-hi);
+  color: var(--text-2);
+  font-size: 0.8125rem;
+}
+
+.repo-trigger:hover {
+  color: var(--text);
+}
+
+.repo-trigger[aria-pressed="true"] {
+  border-color: var(--cyan);
+  color: var(--cyan);
+}
+
+/* The browser centres popovers by default; place() pins it under the trigger instead. */
+.repo-pop {
+  inset: auto;
+  position: fixed;
+  margin: 0;
+  max-height: min(70vh, 560px);
+  overflow-y: auto;
+  min-width: 240px;
+  padding: 6px;
+  background: var(--deck-solid);
+  border: 1px solid var(--line-hi);
+  color: var(--text);
+}
+
+.repo-pop-group {
+  display: grid;
+  padding-top: 6px;
+  margin-top: 6px;
+  border-top: 1px solid var(--line);
+}
+
+.repo-org {
+  padding: 6px 8px 4px;
+  text-align: left;
+  font: 600 0.75rem / 1 var(--font);
+  letter-spacing: 0.005em;
+  color: var(--text-3);
+}
+
+.repo-org:hover {
+  color: var(--text);
+}
+
+.repo-option {
+  display: grid;
+  grid-template-columns: 16px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  padding: 6px 8px;
+  text-align: left;
+  font-size: 0.8125rem;
+  color: var(--text-2);
+}
+
+.repo-option:hover,
+.repo-option:focus-visible {
+  background: var(--deck-2);
+  color: var(--text);
+}
+
+.repo-check {
+  visibility: hidden;
+}
+
+.repo-option[aria-pressed="true"] {
+  color: var(--cyan);
+}
+
+.repo-option[aria-pressed="true"] .repo-check {
+  visibility: visible;
 }
 
 .task-repo {
@@ -3744,4 +3920,264 @@ button.tree-pill:hover {
   display: grid;
   gap: 8px;
   margin-top: 12px;
+}
+
+/* ───── Missions ───── */
+
+.missions {
+  display: grid;
+  grid-template-columns: minmax(240px, 300px) minmax(0, 1fr);
+  min-height: 0;
+}
+
+.missions-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-height: 0;
+  overflow-y: auto;
+  padding: 18px 12px;
+  border-right: 1px solid var(--line);
+  background: var(--void);
+}
+
+.missions-list > .button {
+  align-self: flex-start;
+  margin: 0 8px 12px;
+}
+
+.missions-item {
+  display: grid;
+  gap: 4px;
+  padding: 10px 12px;
+  text-align: left;
+  border-left: 2px solid transparent;
+}
+
+.missions-item:hover {
+  background: var(--deck);
+}
+
+.missions-item[aria-current="true"] {
+  background: var(--deck);
+  border-left-color: var(--cyan);
+}
+
+.missions-item-title {
+  color: var(--text);
+  font-weight: 500;
+}
+
+.missions-item-meta {
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+
+.mission-empty {
+  padding: 28px var(--gutter);
+}
+
+/* The plan editor takes whatever height the header, error and part cards leave. */
+.mission {
+  --hue: var(--cyan);
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+  min-height: 0;
+  padding: 22px var(--gutter);
+}
+
+.mission-head {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px 24px;
+}
+
+.mission-title {
+  display: grid;
+  gap: 6px;
+}
+
+.mission-title h1 {
+  font: 600 1.25rem / 1.25 var(--font);
+  color: var(--text);
+}
+
+.mission-phase {
+  font: 600 0.75rem / 1 var(--font);
+  letter-spacing: 0.005em;
+  color: var(--text-3);
+}
+
+.mission-phase.phase-ready {
+  color: var(--cyan);
+}
+
+.mission-phase.phase-running {
+  color: var(--good);
+}
+
+.mission-actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 18px;
+}
+
+.mission-parts {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  padding: 0;
+  list-style: none;
+}
+
+.mission-part {
+  --hue: var(--slate);
+  display: inline-flex;
+  align-items: stretch;
+  margin: 0;
+  max-width: 100%;
+  background: var(--deck);
+  border: 1px solid var(--line-hi);
+}
+
+.mission-part[aria-current="true"] {
+  border-color: var(--hue);
+}
+
+.mission-part.status-working {
+  --hue: var(--good);
+}
+
+.mission-part.status-waiting,
+.mission-part.status-contract,
+.mission-part.status-error {
+  --hue: var(--hot);
+}
+
+.mission-part.status-preparing,
+.mission-part.status-pr {
+  --hue: var(--cyan);
+}
+
+.mission-part-main {
+  display: grid;
+  grid-template-columns: 8px auto auto;
+  align-items: center;
+  gap: 4px 10px;
+  padding: 9px 12px;
+  text-align: left;
+  color: var(--text);
+}
+
+.mission-part-main:hover {
+  background: var(--deck-2);
+}
+
+.mission-part .row-dot {
+  display: block;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--hue);
+}
+
+.mission-part .icon-button {
+  align-self: center;
+  margin-right: 6px;
+}
+
+.mission-part-repo {
+  font-weight: 500;
+}
+
+.mission-part-status {
+  color: var(--text-3);
+  font-size: 0.75rem;
+}
+
+.mission-part-request {
+  grid-column: 2 / -1;
+  max-width: 420px;
+  color: var(--hot);
+  font-size: 0.75rem;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.mission-waiting {
+  color: var(--hot);
+}
+
+.mission-stale {
+  padding: 8px 12px;
+  border-left: 2px solid var(--amber);
+  background: var(--deck);
+  color: var(--text);
+}
+
+.mission-notes {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+.mission-notes-text {
+  margin: 0;
+  padding: 14px 16px;
+  background: var(--deck);
+  border: 1px solid var(--line);
+  font: 400 0.8125rem / 1.6 var(--mono);
+  white-space: pre-wrap;
+  color: var(--text);
+}
+
+.missions-heading {
+  margin: 14px 12px 4px;
+  font: 600 0.75rem / 1 var(--font);
+  letter-spacing: 0.005em;
+  color: var(--text-3);
+}
+
+.mission-plan {
+  flex: 1;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  gap: 8px;
+  min-height: 0;
+}
+
+.mission-plan-bar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 14px;
+}
+
+.mission-plan-bar > .button {
+  margin-left: auto;
+}
+
+.mission-editor {
+  min-height: 0;
+  height: 100%;
+  resize: none;
+  font: 400 0.8125rem / 1.6 var(--mono);
+}
+
+.mission-repos {
+  border: 0;
+  min-width: 0;
+}
+
+.mission-repo-list {
+  display: grid;
+  gap: 4px;
+  max-height: 220px;
+  overflow-y: auto;
+  padding: 4px 2px;
 }

@@ -2,6 +2,7 @@ mod agent;
 mod auth;
 mod github;
 mod graph;
+mod mission;
 mod pty;
 mod workspace;
 
@@ -107,6 +108,12 @@ pub fn run() {
             github::github_rest,
             agent::agent_run,
             agent::write_agent_context,
+            mission::mission_list,
+            mission::mission_read,
+            mission::mission_write,
+            mission::mission_plan_path,
+            mission::mission_agent,
+            agent::read_agent_notes,
             workspace::prepare_branch,
             workspace::worktree_changes,
             workspace::commit_and_push,

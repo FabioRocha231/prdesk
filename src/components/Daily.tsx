@@ -29,8 +29,12 @@ export function blockers(waiting: TriagedPull[], now: number): TriagedPull[] {
   });
 }
 
+const DEPLOY_MARK: Record<string, string> = { SUCCESS: "✓", INACTIVE: "✓", FAILURE: "✗", ERROR: "✗" };
+
 function line(i: DailyItem): string {
-  return `- ${i.repo}#${i.number} ${i.title}`;
+  // INACTIVE is a deploy a newer one replaced: it did reach the environment.
+  const deploys = i.deploys.map((d): string => `${d.environment} ${DEPLOY_MARK[d.state] ?? "…"}`);
+  return `- ${i.repo}#${i.number} ${i.title}${deploys.length === 0 ? "" : ` (${deploys.join(", ")})`}`;
 }
 
 /** Plain text ready to paste in the stand-up channel. */

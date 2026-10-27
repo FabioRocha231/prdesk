@@ -10,7 +10,8 @@ const TIMEOUT: Duration = Duration::from_secs(10 * 60);
 const MAX_CONTEXT: usize = 2 * 1024 * 1024;
 const MAX_OUTPUT: usize = 512 * 1024;
 const ERROR_TAIL: usize = 600;
-const CONTEXT_FILE: &str = ".prdesk/context.md";
+/// Files the app may write into a worktree's `.prdesk/` for the agent to read.
+const AGENT_FILES: [&str; 2] = ["context.md", "plan.md"];
 
 /// The user's shell, as a login + interactive shell so PATH and aliases match their terminal.
 fn shell(command: &str) -> Command {
@@ -34,43 +35,49 @@ fn tail(text: &str) -> &str {
     text[start..].trim()
 }
 
-fn write_context(tree: &std::path::Path, text: &str) -> Result<(), String> {
+fn write_context(tree: &std::path::Path, file: &str, text: &str) -> Result<(), String> {
+    if !AGENT_FILES.contains(&file) {
+        return Err("Unexpected agent file.".into());
+    }
     if text.len() > MAX_CONTEXT {
         return Err("The context for the agent is too large.".into());
     }
     exclude_prdesk(tree)?;
     std::fs::create_dir_all(tree.join(".prdesk"))
         .map_err(|e| format!("Could not write agent context: {e}"))?;
-    std::fs::write(tree.join(CONTEXT_FILE), text)
+    std::fs::write(tree.join(".prdesk").join(file), text)
         .map_err(|e| format!("Could not write agent context: {e}"))
 }
 
-/// Writes `.prdesk/context.md` for an interactive agent whose prompt points at it.
+/// Writes `.prdesk/<file>` (context.md by default, or a mission's plan.md) for an agent whose prompt points at it.
 #[tauri::command]
 pub fn write_agent_context(
     path: String,
     workspace_dir: String,
     text: String,
+    file: Option<String>,
 ) -> Result<(), String> {
-    write_context(&inside_workspace(&path, &workspace_dir)?, &text)
+    let file = file.as_deref().unwrap_or("context.md");
+    write_context(&inside_workspace(&path, &workspace_dir)?, file, &text)
 }
 
-/// Runs an agent CLI headless (`claude -p`, `codex exec`, …) in a worktree and returns what it printed.
-/// `context` (diff, threads) is written to `.prdesk/context.md` for the agent to read, keeping argv short.
+/// The agent's `.prdesk/notes.md` (progress, questions, contract change requests); empty when it wrote none.
 #[tauri::command]
-pub async fn agent_run(
-    path: String,
-    workspace_dir: String,
-    command: String,
-    context: Option<String>,
-) -> Result<String, String> {
-    let tree = inside_workspace(&path, &workspace_dir)?;
-    if let Some(text) = context {
-        write_context(&tree, &text)?;
+pub fn read_agent_notes(path: String, workspace_dir: String) -> Result<String, String> {
+    let file = inside_workspace(&path, &workspace_dir)?
+        .join(".prdesk")
+        .join("notes.md");
+    match std::fs::read_to_string(&file) {
+        Ok(text) => Ok(text.chars().take(MAX_OUTPUT).collect()),
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(String::new()),
+        Err(e) => Err(format!("Could not read the agent notes: {e}")),
     }
+}
 
-    let child = shell(&command)
-        .current_dir(&tree)
+/// Runs `command` headless in `dir` and returns what it printed, or the tail of its error output.
+pub(crate) async fn run_headless(dir: &std::path::Path, command: &str) -> Result<String, String> {
+    let child = shell(command)
+        .current_dir(dir)
         .stdin(Stdio::null())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -85,7 +92,10 @@ pub async fn agent_run(
     let stdout = String::from_utf8_lossy(&out.stdout);
     if !out.status.success() {
         let stderr = String::from_utf8_lossy(&out.stderr);
-        eprintln!("[agent.agent_run] exit {:?}: {stderr}", out.status.code());
+        eprintln!(
+            "[agent.run_headless] exit {:?}: {stderr}",
+            out.status.code()
+        );
         let reason = if stderr.trim().is_empty() {
             tail(&stdout)
         } else {
@@ -94,6 +104,22 @@ pub async fn agent_run(
         return Err(format!("The agent exited with an error: {reason}"));
     }
     Ok(stdout.chars().take(MAX_OUTPUT).collect())
+}
+
+/// Runs an agent CLI headless (`claude -p`, `codex exec`, …) in a worktree and returns what it printed.
+/// `context` (diff, threads) is written to `.prdesk/context.md` for the agent to read, keeping argv short.
+#[tauri::command]
+pub async fn agent_run(
+    path: String,
+    workspace_dir: String,
+    command: String,
+    context: Option<String>,
+) -> Result<String, String> {
+    let tree = inside_workspace(&path, &workspace_dir)?;
+    if let Some(text) = context {
+        write_context(&tree, "context.md", &text)?;
+    }
+    run_headless(&tree, &command).await
 }
 
 #[cfg(test)]

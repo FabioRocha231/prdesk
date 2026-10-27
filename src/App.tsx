@@ -1,8 +1,9 @@
-import { openUrl } from "@tauri-apps/plugin-opener";
+import { openUrl, revealItemInDir } from "@tauri-apps/plugin-opener";
 import {
   ArrowLeft,
   Bell,
   CalendarCheck,
+  CircleDot,
   CircleHelp,
   Clock,
   GitGraph,
@@ -12,6 +13,7 @@ import {
   Search as SearchIcon,
   Settings as SettingsIcon,
   Terminal as TerminalIcon,
+  Workflow,
   X,
 } from "lucide-react";
 import type { ReactElement } from "react";
@@ -25,13 +27,26 @@ import { Detail, type DetailState, type PrAi, type SnoozeChoice } from "./compon
 import { Feed } from "./components/Feed";
 import { TreeView } from "./components/GitTree";
 import { HelpDialog } from "./components/Help";
+import { IssuesDialog } from "./components/Issues";
+import { MissionsView, NewMissionDialog, type PartStatus } from "./components/Mission";
 import { Palette } from "./components/Palette";
+import { BranchPrDialog, RadarStrip } from "./components/Radar";
+import { RepoFilter } from "./components/RepoFilter";
 import type { AiState } from "./components/Review";
 import { Settings } from "./components/Settings";
-import { NewTaskDialog, type Task, TaskView } from "./components/Task";
+import { branchFor, NewTaskDialog, type Task, type TaskSeed, TaskView } from "./components/Task";
 import { Terminal } from "./components/Terminal";
 import { htmlToText, type ReplyDrafter } from "./components/Threads";
-import { diffContext, REPLY_PROMPT, REVIEW_PROMPT, readReview, replyContext, stripFence } from "./lib/ai";
+import {
+  DESCRIBE_PROMPT,
+  diffContext,
+  REPLY_PROMPT,
+  REVIEW_PROMPT,
+  readDescription,
+  readReview,
+  replyContext,
+  stripFence,
+} from "./lib/ai";
 import {
   type Agent,
   agentCommand,
@@ -44,26 +59,75 @@ import {
 } from "./lib/config";
 import { chains as chainsOf, type Deps, dependencyIndex, type PrRef, refKey, shortRef } from "./lib/deps";
 import { clock } from "./lib/format";
-import { fetchDetail, fetchPull, fetchPulls, type PullCache, pullsFromCache } from "./lib/github";
+import {
+  createPull,
+  fetchDetail,
+  fetchIssues,
+  fetchPull,
+  fetchPulls,
+  fetchRadar,
+  type Issue,
+  type PullCache,
+  pullsFromCache,
+  type Radar,
+  type StrayBranch,
+} from "./lib/github";
 import {
   type Activity,
   agentRun,
+  type Changes,
+  commitAndPush,
   errorMessage,
   githubNotifications,
+  missionAgent,
+  missionList,
+  missionPlanPath,
+  missionRead,
+  missionWrite,
   prepareBranch,
   prepareWorktree,
   ptyKill,
   ptySpawn,
+  ptyWrite,
+  readAgentNotes,
   tokenStatus,
+  worktreeChanges,
   writeAgentContext,
 } from "./lib/ipc";
+import {
+  checkPrompt,
+  checkRequest,
+  contractChange,
+  type Mission,
+  type MissionCheck,
+  type MissionPart,
+  mergeOrder,
+  missionId,
+  PROPAGATE_MESSAGE,
+  parsePlan,
+  partContext,
+  partTask,
+  planHash,
+  planPrompt,
+  planRequest,
+  planTemplate,
+  prBody,
+  slugify,
+} from "./lib/mission";
 import { COLUMNS, type DraftComment, type PrFile, type PullRequest, type TriagedPull } from "./lib/model";
 import { mergeFeed, notifyActivity, notifyAgentQuiet, notifyBranchChanges, setBadge } from "./lib/notify";
 import { loadCached, loadValue, saveCached, saveValue } from "./lib/persist";
+import { activeFilter, reposByOrg, toggleRepo } from "./lib/repoFilter";
 import { isSnoozed, type Snoozes, wakeTime } from "./lib/snooze";
 import { board, triage } from "./lib/triage";
 
 const SECOND = 1000;
+const RADAR_EVERY_MS = 5 * 60 * SECOND;
+const DOCK_MIN = 160;
+const DOCK_MIN_ABOVE = 220;
+const DOCK_STEP = 40;
+// The task box holds 4000 characters; a long issue body is cut, the agent can still open the issue.
+const MAX_TASK_TEXT = 4000;
 const INITIAL_ROWS = 24;
 const INITIAL_COLS = 80;
 const HOUR = 3600 * SECOND;
@@ -74,6 +138,9 @@ const IDLE_AI: AiState = { status: "idle" };
 const NO_DRAFTS: DraftComment[] = [];
 const NO_DEPS: Deps = { blockedBy: [], blocks: [] };
 const TASK_PREFIX = "task:";
+const MAX_MISSION_TITLE = 120;
+const NOTES_EVERY_MS = 30 * SECOND;
+
 const BOARD_CACHE_KEY = "board";
 
 /** "https://api.github.com/graphql" → "github.com"; a GHE host stays as is. */
@@ -109,7 +176,14 @@ function isTyping(target: EventTarget | null): boolean {
 export function App(): ReactElement {
   const [config, setConfig] = useState<Config | null>(null);
   const [hasToken, setHasToken] = useState<boolean | null>(null);
-  const [view, setView] = useState<"board" | "settings" | "tree" | "chains">("board");
+  const [view, setView] = useState<"board" | "settings" | "tree" | "chains" | "missions">("board");
+  const [missions, setMissions] = useState<Mission[]>([]);
+  const [missionPlans, setMissionPlans] = useState<Record<string, string>>({});
+  const [openMissionId, setOpenMissionId] = useState<string | null>(null);
+  const [newMissionOpen, setNewMissionOpen] = useState(false);
+  // Each part's .prdesk/notes.md by task id, and the last integration check per mission.
+  const [partNotes, setPartNotes] = useState<Record<string, string>>({});
+  const [missionChecks, setMissionChecks] = useState<Record<string, MissionCheck>>({});
   const [me, setMe] = useState<string | null>(null);
   const [pulls, setPulls] = useState<PullRequest[] | null>(null);
   const [sync, setSync] = useState<Sync>({ loading: false, at: null, error: null });
@@ -131,8 +205,19 @@ export function App(): ReactElement {
   const [worktrees, setWorktrees] = useState<Record<string, string>>({});
   const [snoozes, setSnoozes] = useState<Snoozes>({});
   const [showSnoozed, setShowSnoozed] = useState(false);
+  const [repoFilter, setRepoFilter] = useState<string[]>([]);
+  // Terminal dock height in px once the user resized it; null keeps the default share of the window.
+  const [dockHeight, setDockHeight] = useState<number | null>(null);
+  const [dockDragging, setDockDragging] = useState(false);
   const [tasks, setTasks] = useState<Record<string, Task>>({});
   const [newTaskOpen, setNewTaskOpen] = useState(false);
+  const [taskSeed, setTaskSeed] = useState<TaskSeed | null>(null);
+  const [radar, setRadar] = useState<Radar>({ branches: [], broken: [] });
+  const [stray, setStray] = useState<StrayBranch | null>(null);
+  const [issues, setIssues] = useState<Issue[] | null>(null);
+  const [issuesError, setIssuesError] = useState<string | null>(null);
+  const [issuesOpen, setIssuesOpen] = useState(false);
+  const radarAt = useRef(0);
   const [dailyOpen, setDailyOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
   const inFlight = useRef(false);
@@ -162,6 +247,8 @@ export function App(): ReactElement {
       setAgentId(loaded.defaultAgentId);
       setSnoozes(await loadValue<Snoozes>("snoozes", {}));
       setTasks(await loadValue<Record<string, Task>>("tasks", {}));
+      setRepoFilter(await loadValue<string[]>("repoFilter", []));
+      setDockHeight(await loadValue<number | null>("dockHeight", null));
       // Last sync's board shows at once; the first refresh then only fetches what changed while the app was closed.
       try {
         const cached = await loadCached<{ me: string; pulls: PullCache } | null>(BOARD_CACHE_KEY, null);
@@ -176,6 +263,27 @@ export function App(): ReactElement {
       await checkToken();
     })();
   }, [checkToken]);
+
+  // Branches, red bases and issues change slowly and cost a query each, so they ride along every few minutes.
+  const updateRadar = useCallback(
+    async (all: PullRequest[], login: string, force = false): Promise<void> => {
+      if (config === null || (!force && Date.now() - radarAt.current < RADAR_EVERY_MS)) return;
+      radarAt.current = Date.now();
+      // Repos where I have PRs come first: that is where my other branches most likely are.
+      const count = new Map<string, number>();
+      for (const p of all) count.set(p.repo, (count.get(p.repo) ?? 0) + (p.author === login ? 100 : 1));
+      const repos = [...count].sort((a, b): number => b[1] - a[1]).map(([repo]): string => repo);
+      const [nextRadar, nextIssues] = await Promise.allSettled([fetchRadar(config, repos, login), fetchIssues(config)]);
+      if (nextRadar.status === "fulfilled") setRadar(nextRadar.value);
+      // Degraded: the radar strip keeps its last state; the next refresh tries again.
+      else console.warn("[App.radar] fetch failed", errorMessage(nextRadar.reason));
+      if (nextIssues.status === "fulfilled") {
+        setIssues(nextIssues.value);
+        setIssuesError(null);
+      } else setIssuesError(errorMessage(nextIssues.reason));
+    },
+    [config],
+  );
 
   const refresh = useCallback(async (): Promise<void> => {
     if (config === null) return;
@@ -195,6 +303,7 @@ export function App(): ReactElement {
         // Degraded: the next launch just starts from an empty board.
       });
       void setBadge(board(result.pulls, result.me).myTurn.length);
+      void updateRadar(result.pulls, result.me);
       if (pulls !== null) void notifyBranchChanges(pulls, result.pulls, result.me);
       const apply = (): void => {
         setMe(result.me);
@@ -213,7 +322,7 @@ export function App(): ReactElement {
         void refreshRef.current();
       }
     }
-  }, [config, pulls]);
+  }, [config, pulls, updateRadar]);
 
   const refreshRef = useRef(refresh);
   refreshRef.current = refresh;
@@ -270,10 +379,23 @@ export function App(): ReactElement {
 
   const now = Date.now();
   const snoozedCount = (pulls ?? []).filter((p): boolean => isSnoozed(snoozes[p.id], p, now)).length;
+  const repoOrgs = useMemo(() => reposByOrg((pulls ?? []).map((p): string => p.repo)), [pulls]);
+  const chipRepos = useMemo((): string[] => repoOrgs.flatMap(([, repos]): string[] => repos), [repoOrgs]);
+  // A saved repo with no PRs left would empty the board for no visible reason, so it stops counting.
+  const shownRepos = useMemo(() => activeFilter(repoFilter, chipRepos), [repoFilter, chipRepos]);
   const visible = useMemo(
-    (): PullRequest[] => (pulls ?? []).filter((p): boolean => showSnoozed || !isSnoozed(snoozes[p.id], p, Date.now())),
-    [pulls, snoozes, showSnoozed],
+    (): PullRequest[] =>
+      (pulls ?? []).filter(
+        (p): boolean =>
+          (showSnoozed || !isSnoozed(snoozes[p.id], p, Date.now())) &&
+          (shownRepos.length === 0 || shownRepos.includes(p.repo)),
+      ),
+    [pulls, snoozes, showSnoozed, shownRepos],
   );
+  const changeRepoFilter = (next: string[]): void => {
+    setRepoFilter(next);
+    void saveValue("repoFilter", next);
+  };
   const groups = useMemo(() => board(visible, me ?? ""), [visible, me]);
   const deps = useMemo(
     () => dependencyIndex([...(pulls ?? []), ...Object.values(extra).filter((p): boolean => p.closed === undefined)]),
@@ -436,13 +558,14 @@ export function App(): ReactElement {
     void saveValue("tasks", next);
   };
 
-  const createTask = async (repo: string, branch: string, text: string): Promise<void> => {
+  const createTask = async (repo: string, branch: string, text: string, issue?: number): Promise<void> => {
     if (config === null) return;
     setNewTaskOpen(false);
+    setTaskSeed(null);
     const repoUrl =
       pulls?.find((p): boolean => p.repo === repo)?.repoUrl ?? `https://${webHost(config.apiUrl)}/${repo}`;
     const id = `${TASK_PREFIX}${repo}:${branch}`;
-    const task: Task = { id, repo, repoUrl, branch, text, cwd: null };
+    const task: Task = { id, repo, repoUrl, branch, text, cwd: null, ...(issue === undefined ? {} : { issue }) };
     saveTasks({ ...tasks, [id]: task });
     setView("board");
     navigate(id);
@@ -463,6 +586,414 @@ export function App(): ReactElement {
       ),
       `# Task\n\n${text}`,
     );
+  };
+
+  // ── Missions: one plan.md, one worktree and agent per repo. Files on disk are the source of truth. ──
+
+  const saveMission = async (m: Mission): Promise<void> => {
+    if (config === null) return;
+    setMissions((all) => [m, ...all.filter((x): boolean => x.id !== m.id)]);
+    await missionWrite(config.workspaceDir, m.id, "mission.json", JSON.stringify(m, null, 2));
+  };
+
+  const loadMissions = async (): Promise<void> => {
+    if (config === null) return;
+    try {
+      const raw = await missionList(config.workspaceDir);
+      const list = raw.flatMap((text): Mission[] => {
+        try {
+          return [JSON.parse(text) as Mission];
+        } catch {
+          // A hand-broken mission.json hides that mission; its folder and plan.md stay untouched.
+          return [];
+        }
+      });
+      list.sort((a, b): number => Date.parse(b.createdAt) - Date.parse(a.createdAt));
+      setMissions(list);
+      const plans = await Promise.all(
+        list.map(
+          async (m): Promise<[string, string]> => [m.id, await missionRead(config.workspaceDir, m.id, "plan.md")],
+        ),
+      );
+      setMissionPlans(Object.fromEntries(plans));
+      await loadNotes(list);
+      // A delivered mission is done once every one of its PRs is merged or closed.
+      for (const m of list.filter((x): boolean => x.phase === "delivered")) {
+        const states = await Promise.all(
+          m.parts.map(
+            async (p): Promise<boolean> =>
+              p.pr === undefined ? false : (await fetchPull(config, p.repo, p.pr)).closed !== undefined,
+          ),
+        );
+        if (states.every(Boolean)) await saveMission({ ...m, phase: "done" });
+      }
+    } catch (e) {
+      console.warn("[App.missions] load failed", errorMessage(e));
+    }
+  };
+  const loadMissionsRef = useRef(loadMissions);
+  loadMissionsRef.current = loadMissions;
+
+  /** Re-reads notes.md of every part still being worked on. */
+  const loadNotes = async (list: Mission[]): Promise<void> => {
+    if (config === null) return;
+    const live = list
+      .filter((m): boolean => m.phase === "running")
+      .flatMap((m): MissionPart[] => m.parts.filter((p): boolean => p.cwd !== null && p.pr === undefined));
+    const read = await Promise.allSettled(
+      live.map(
+        async (p): Promise<[string, string]> => [p.taskId, await readAgentNotes(p.cwd ?? "", config.workspaceDir)],
+      ),
+    );
+    const notes = read.flatMap((r): [string, string][] => (r.status === "fulfilled" ? [r.value] : []));
+    if (notes.length > 0) setPartNotes((all) => ({ ...all, ...Object.fromEntries(notes) }));
+  };
+
+  const readPlan = async (id: string): Promise<string> => {
+    if (config === null) return "";
+    const text = await missionRead(config.workspaceDir, id, "plan.md");
+    setMissionPlans((p) => ({ ...p, [id]: text }));
+    return text;
+  };
+
+  const writePlan = async (id: string, text: string): Promise<void> => {
+    if (config === null) return;
+    await missionWrite(config.workspaceDir, id, "plan.md", text);
+    setMissionPlans((p) => ({ ...p, [id]: text }));
+  };
+
+  const repoUrlOf = (repo: string): string =>
+    pulls?.find((p): boolean => p.repo === repo)?.repoUrl ?? `https://${webHost(config?.apiUrl ?? "")}/${repo}`;
+
+  const missionPart = (repo: string, branch: string): MissionPart => ({
+    repo,
+    repoUrl: repoUrlOf(repo),
+    branch,
+    taskId: `${TASK_PREFIX}${repo}:${branch}`,
+    cwd: null,
+  });
+
+  /** Worktrees for every part that has none yet; failures are reported per repo and the rest keep theirs. */
+  const prepareParts = async (m: Mission): Promise<Mission> => {
+    if (config === null) return m;
+    const results = await Promise.allSettled(
+      m.parts.map(async (p): Promise<MissionPart> => {
+        if (p.cwd !== null) return p;
+        const [owner = "", name = ""] = p.repo.split("/");
+        const cwd = await prepareBranch({
+          repoUrl: p.repoUrl,
+          owner,
+          repo: name,
+          branch: p.branch,
+          workspaceDir: config.workspaceDir,
+        });
+        return { ...p, cwd };
+      }),
+    );
+    const parts = results.map(
+      (r, i): MissionPart => (r.status === "fulfilled" ? r.value : (m.parts[i] as MissionPart)),
+    );
+    const failed = results.flatMap((r, i): string[] =>
+      r.status === "rejected" ? [`${m.parts[i]?.repo}: ${errorMessage(r.reason)}`] : [],
+    );
+    const { error: _old, ...rest } = m;
+    return failed.length === 0
+      ? { ...rest, parts }
+      : { ...rest, parts, error: `Não deu para preparar ${failed.join("; ")}` };
+  };
+
+  /** Runs the planning agent over every worktree and writes plan.md; without a headless agent the template stays. */
+  const planMission = async (start: Mission): Promise<void> => {
+    if (config === null) return;
+    const agent = currentAgent();
+    if (agent === undefined || agent.headless.trim() === "") {
+      await saveMission({
+        ...start,
+        phase: "ready",
+        error: "O agente escolhido não roda headless: escreva o plano à mão.",
+      });
+      return;
+    }
+    const planning: Mission = { ...start, phase: "planning" };
+    await saveMission(planning);
+    try {
+      const worktrees = planning.parts.flatMap((p): { repo: string; path: string }[] =>
+        p.cwd === null ? [] : [{ repo: p.repo, path: p.cwd }],
+      );
+      const out = await missionAgent(
+        config.workspaceDir,
+        planning.id,
+        headlessCommand(agent, planPrompt(planning.id)),
+        "request.md",
+        planRequest(planning.request, worktrees),
+      );
+      await writePlan(planning.id, `${stripFence(out).trim()}\n`);
+      const { error: _old, ...rest } = planning;
+      await saveMission({ ...rest, phase: "ready" });
+    } catch (e) {
+      await saveMission({ ...planning, phase: "ready", error: `O agente não conseguiu planejar: ${errorMessage(e)}` });
+    }
+  };
+
+  const createMission = async (request: string, repos: string[]): Promise<void> => {
+    if (config === null) return;
+    setNewMissionOpen(false);
+    const title = (request.split("\n")[0] ?? "").trim().slice(0, MAX_MISSION_TITLE);
+    let id = missionId(title, new Date());
+    // Two missions with the same title on the same day get -2, -3…
+    for (let n = 2; missions.some((m): boolean => m.id === id); n++) id = `${missionId(title, new Date())}-${n}`;
+    const branch = `prdesk/${slugify(title) || "missao"}`;
+    const mission: Mission = {
+      id,
+      title,
+      request,
+      createdAt: new Date().toISOString(),
+      phase: "preparing",
+      parts: repos.map((r): MissionPart => missionPart(r, branch)),
+    };
+    setOpenMissionId(id);
+    setView("missions");
+    await saveMission(mission);
+    await writePlan(id, planTemplate(title, repos));
+    const prepared = await prepareParts(mission);
+    await saveMission(prepared);
+    if (prepared.error === undefined) await planMission(prepared);
+  };
+
+  const replanMission = async (id: string): Promise<void> => {
+    const m = missions.find((x): boolean => x.id === id);
+    if (m === undefined) return;
+    const prepared = await prepareParts({ ...m, phase: "preparing" });
+    await saveMission(prepared);
+    if (prepared.error === undefined) await planMission(prepared);
+  };
+
+  /** One task and agent per plan part; repos the plan added get their worktree first. */
+  const launchMission = async (id: string): Promise<void> => {
+    const m = missions.find((x): boolean => x.id === id);
+    if (config === null || m === undefined) return;
+    const text = await readPlan(id);
+    const parsed = parsePlan(text);
+    if (!parsed.ok) {
+      await saveMission({ ...m, error: parsed.error });
+      return;
+    }
+    const branch = m.parts[0]?.branch ?? `prdesk/${slugify(m.title) || "missao"}`;
+    const parts = parsed.plan.parts.map(
+      (pp): MissionPart => m.parts.find((p): boolean => p.repo === pp.repo) ?? missionPart(pp.repo, branch),
+    );
+    const prepared = await prepareParts({ ...m, parts });
+    if (prepared.error !== undefined) {
+      await saveMission(prepared);
+      return;
+    }
+    const title = parsed.plan.title || m.title;
+    const next: Record<string, Task> = { ...tasks };
+    for (const p of prepared.parts) {
+      next[p.taskId] = {
+        id: p.taskId,
+        repo: p.repo,
+        repoUrl: p.repoUrl,
+        branch: p.branch,
+        text: `${title} · ${p.repo}`,
+        cwd: p.cwd,
+        mission: id,
+      };
+    }
+    saveTasks(next);
+    await saveMission({ ...prepared, phase: "running", propagated: planHash(text) });
+    await Promise.all(
+      prepared.parts.map(async (p): Promise<void> => {
+        const part = parsed.plan.parts.find((pp): boolean => pp.repo === p.repo);
+        const cwd = p.cwd;
+        if (part === undefined || cwd === null) return;
+        await writeAgentContext(cwd, config.workspaceDir, text, "plan.md");
+        await spawnAgent(
+          p.taskId,
+          async (): Promise<string> => cwd,
+          contextPrompt(partTask(title, p.repo, prepared.parts.length)),
+          partContext(part),
+        );
+      }),
+    );
+  };
+
+  // plan.md may be edited in another editor: re-read missions when the app opens and whenever the window regains focus.
+  useEffect((): (() => void) | undefined => {
+    if (config === null) return undefined;
+    void loadMissionsRef.current();
+    const onFocus = (): void => void loadMissionsRef.current();
+    window.addEventListener("focus", onFocus);
+    return (): void => window.removeEventListener("focus", onFocus);
+  }, [config]);
+
+  const hasRunningMission = missions.some((m): boolean => m.phase === "running");
+  const missionsRef = useRef(missions);
+  missionsRef.current = missions;
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the interval reads the latest missions through a ref
+  useEffect((): (() => void) | undefined => {
+    if (!hasRunningMission) return undefined;
+    const timer = window.setInterval((): void => void loadNotes(missionsRef.current), NOTES_EVERY_MS);
+    return (): void => window.clearInterval(timer);
+  }, [hasRunningMission]);
+
+  const partStatus = (m: Mission, p: MissionPart): PartStatus => {
+    if (p.pr !== undefined) return "pr";
+    const notes = partNotes[p.taskId] ?? "";
+    if (contractChange(notes) !== null && m.seenNotes?.[p.repo] !== planHash(notes)) return "contract";
+    const s = sessions[p.taskId];
+    if (s === undefined) return "idle";
+    if (s.status === "running") return s.quiet === true ? "waiting" : "working";
+    return s.status;
+  };
+
+  /** Copies plan.md into every worktree and tells each running agent to re-read it. */
+  const propagatePlan = async (id: string): Promise<void> => {
+    const m = missions.find((x): boolean => x.id === id);
+    if (config === null || m === undefined) return;
+    const text = await readPlan(id);
+    const parsed = parsePlan(text);
+    if (!parsed.ok) {
+      await saveMission({ ...m, error: parsed.error });
+      return;
+    }
+    const live = m.parts.filter((p): boolean => p.cwd !== null && p.pr === undefined);
+    await Promise.all(
+      live.map(async (p): Promise<void> => {
+        await writeAgentContext(p.cwd ?? "", config.workspaceDir, text, "plan.md");
+        const s = sessions[p.taskId];
+        // The trailing carriage return submits the line in the agent's prompt.
+        if (s?.status === "running") await ptyWrite(s.sessionId, `${PROPAGATE_MESSAGE}\r`);
+      }),
+    );
+    const seenNotes = Object.fromEntries(
+      live.map((p): [string, string] => [p.repo, planHash(partNotes[p.taskId] ?? "")]),
+    );
+    const { error: _old, ...rest } = m;
+    await saveMission({ ...rest, propagated: planHash(text), seenNotes });
+  };
+
+  /** One headless pass over every part's diff against the contract. */
+  const checkMission = async (id: string): Promise<void> => {
+    const m = missions.find((x): boolean => x.id === id);
+    const agent = currentAgent();
+    if (config === null || m === undefined || agent === undefined || agent.headless.trim() === "") return;
+    setMissionChecks((c) => ({ ...c, [id]: { status: "running" } }));
+    try {
+      const parsed = parsePlan(await readPlan(id));
+      const contract = parsed.ok ? parsed.plan.contract : "";
+      const diffs = await Promise.all(
+        m.parts
+          .filter((p): boolean => p.cwd !== null)
+          .map(
+            async (p): Promise<{ repo: string; diff: string }> => ({
+              repo: p.repo,
+              diff: (await worktreeChanges(p.cwd ?? "", config.workspaceDir)).diff,
+            }),
+          ),
+      );
+      const out = await missionAgent(
+        config.workspaceDir,
+        id,
+        headlessCommand(agent, checkPrompt(id)),
+        "check.md",
+        checkRequest(contract, diffs),
+      );
+      setMissionChecks((c) => ({ ...c, [id]: { status: "done", text: stripFence(out).trim() } }));
+    } catch (e) {
+      setMissionChecks((c) => ({ ...c, [id]: { status: "error", message: errorMessage(e) } }));
+    }
+  };
+
+  /**
+   * Commits, pushes and opens one draft PR per part in merge order, each naming the PRs it depends on. Stops at the
+   * first failure; parts that already have a PR are skipped, so "Abrir PRs" again resumes where it stopped.
+   */
+  const deliverMission = async (id: string): Promise<void> => {
+    const m = missions.find((x): boolean => x.id === id);
+    if (config === null || m === undefined) return;
+    const parsed = parsePlan(await readPlan(id));
+    const order = parsed.ok ? mergeOrder(parsed.plan.parts) : null;
+    if (!parsed.ok || order === null) {
+      await saveMission({ ...m, error: parsed.ok ? "As dependências formam um ciclo." : parsed.error });
+      return;
+    }
+    const title = parsed.plan.title || m.title;
+    const pending = m.parts.filter((p): boolean => p.pr === undefined && p.cwd !== null);
+    const changes = new Map(
+      await Promise.all(
+        pending.map(
+          async (p): Promise<[string, Changes]> => [p.repo, await worktreeChanges(p.cwd ?? "", config.workspaceDir)],
+        ),
+      ),
+    );
+    const empty = pending.filter((p): boolean => {
+      const c = changes.get(p.repo);
+      return c === undefined || (c.files.length === 0 && (c.unpushed ?? 0) === 0);
+    });
+    if (empty.length > 0) {
+      await saveMission({ ...m, error: `Sem mudanças ainda em ${empty.map((p): string => p.repo).join(", ")}.` });
+      return;
+    }
+    const { error: _old, ...clean } = m;
+    let current: Mission = clean;
+    const numbers = new Map(m.parts.flatMap((p): [string, number][] => (p.pr === undefined ? [] : [[p.repo, p.pr]])));
+    const opened: { task: Task | undefined; pr: PullRequest }[] = [];
+    for (const step of order) {
+      const part = current.parts.find((p): boolean => p.repo === step.repo);
+      if (part === undefined || part.pr !== undefined || part.cwd === null) continue;
+      const cwd = part.cwd;
+      try {
+        let prTitle = title;
+        let body = step.body;
+        const ai = aiIn(async (): Promise<string> => cwd);
+        if (ai !== null) {
+          try {
+            const diff = changes.get(part.repo)?.diff ?? "";
+            const context = `# Task\n\n${title}\n\n${step.body}\n\n# Diff\n\n\`\`\`diff\n${diff}\n\`\`\``;
+            ({ title: prTitle, body } = readDescription(await ai.run(DESCRIBE_PROMPT, context)));
+          } catch (e) {
+            // Degraded: the plan's own text describes the PR; it can be improved inside the PR.
+            console.warn("[App.deliver] describe failed", part.repo, errorMessage(e));
+          }
+        }
+        await commitAndPush(cwd, config.workspaceDir, prTitle, part.repoUrl);
+        const after = step.dependsOn.flatMap((d): { repo: string; number: number }[] => {
+          const n = numbers.get(d);
+          return n === undefined ? [] : [{ repo: d, number: n }];
+        });
+        const number = await createPull(config, part.repo, part.branch, prTitle, prBody(body, title, after), true);
+        numbers.set(part.repo, number);
+        current = { ...current, parts: current.parts.map((p): MissionPart => (p === part ? { ...p, pr: number } : p)) };
+        await saveMission(current);
+        opened.push({ task: tasks[part.taskId], pr: await fetchPull(config, part.repo, number) });
+      } catch (e) {
+        current = { ...current, error: `Não deu para abrir a PR de ${part.repo}: ${errorMessage(e)}` };
+        break;
+      }
+    }
+    // Like a single task becoming a PR: the terminal session and worktree move to the PR, the task goes away.
+    setExtra((x) => ({ ...x, ...Object.fromEntries(opened.map((o): [string, PullRequest] => [o.pr.id, o.pr])) }));
+    setSessions((all) => {
+      const next = { ...all };
+      for (const { task, pr } of opened) {
+        const moved = task === undefined ? undefined : next[task.id];
+        if (task !== undefined) delete next[task.id];
+        if (moved !== undefined) next[pr.id] = moved;
+      }
+      return next;
+    });
+    setWorktrees((w) => ({
+      ...w,
+      ...Object.fromEntries(
+        opened.flatMap((o): [string, string][] => (o.task?.cwd == null ? [] : [[o.pr.id, o.task.cwd]])),
+      ),
+    }));
+    const doneIds = new Set(opened.flatMap((o): string[] => (o.task === undefined ? [] : [o.task.id])));
+    saveTasks(Object.fromEntries(Object.entries(tasks).filter(([k]): boolean => !doneIds.has(k))));
+    const allOpen = current.parts.every((p): boolean => p.pr !== undefined);
+    await saveMission(allOpen && current.error === undefined ? { ...current, phase: "delivered" } : current);
+    void refresh();
   };
 
   /** The task became a PR: the terminal session moves to it and the task goes away. */
@@ -502,7 +1033,8 @@ export function App(): ReactElement {
     const pr = pulls?.find((p): boolean => p.id === key) ?? extra[key];
     if (pr !== undefined) return `${shortRef(pr)} · ${pr.title}`;
     const task = tasks[key];
-    return task === undefined ? "" : `${task.repo} · ${task.text}`;
+    if (task === undefined) return "";
+    return task.mission === undefined ? `${task.repo} · ${task.text}` : `Missão ${task.text}`;
   };
 
   const onSessionQuiet = useCallback((sessionId: number, quiet: boolean): void => {
@@ -545,6 +1077,9 @@ export function App(): ReactElement {
   const navigate = (id: string | null): void => {
     // Back on the board, the card I was on stays highlighted.
     if (id === null && selectedId !== null) setCursor(selectedId);
+    // A dependency chip can point at a PR the repo filter hides; opening it shows the whole board again.
+    const hidden = pulls?.find((p): boolean => p.id === id && shownRepos.length > 0 && !shownRepos.includes(p.repo));
+    if (hidden !== undefined) changeRepoFilter([]);
     const crossing = (id === null) !== (selectedId === null);
     if (crossing) transition((): void => setSelectedId(id));
     else setSelectedId(id);
@@ -553,6 +1088,24 @@ export function App(): ReactElement {
   const unread = feed.filter((a): boolean => Date.parse(a.updatedAt) > feedSeenAt).length;
 
   const openFeed = (): void => setFeedOpen(true);
+
+  const startIssue = (issue: Issue): void => {
+    setIssuesOpen(false);
+    setTaskSeed({
+      repo: issue.repo,
+      text: `Resolve ${issue.repo}#${issue.number}: ${issue.title}\n\n${issue.body}`.slice(0, MAX_TASK_TEXT).trim(),
+      branch: branchFor(`${issue.number} ${issue.title}`),
+      issue: issue.number,
+    });
+    setNewTaskOpen(true);
+  };
+
+  const branchOpened = async (branch: StrayBranch, number: number): Promise<void> => {
+    setStray(null);
+    setRadar((r): Radar => ({ ...r, branches: r.branches.filter((b): boolean => b !== branch) }));
+    await openRef({ repo: branch.repo, number });
+    void refreshRef.current();
+  };
 
   const closeFeed = (): void => {
     setFeedOpen(false);
@@ -591,10 +1144,19 @@ export function App(): ReactElement {
       setPaletteOpen(true);
       return;
     }
-    if (e.metaKey || e.ctrlKey || e.altKey || paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen) return;
+    const dialogOpen =
+      paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen || issuesOpen || newMissionOpen || stray !== null;
+    if (e.metaKey || e.ctrlKey || e.altKey || dialogOpen) return;
     if (e.key === "Escape") {
+      const mission = selectedId === null ? undefined : tasks[selectedId]?.mission;
       if (view !== "board" && hasToken === true) setView("board");
-      else if (!isTyping(e.target)) navigate(null);
+      else if (!isTyping(e.target)) {
+        navigate(null);
+        if (mission !== undefined) {
+          setOpenMissionId(mission);
+          setView("missions");
+        }
+      }
       return;
     }
     if (isTyping(e.target)) return;
@@ -610,6 +1172,10 @@ export function App(): ReactElement {
       setHelpOpen(true);
       return;
     }
+    if (e.key === "i") {
+      setIssuesOpen(true);
+      return;
+    }
     if (e.key === "p") {
       // Otherwise the "p" lands in the dialog's first field.
       e.preventDefault();
@@ -620,7 +1186,18 @@ export function App(): ReactElement {
       setView(view === "tree" ? "board" : "tree");
       return;
     }
+    if (e.key === "m") {
+      setView(view === "missions" ? "board" : "missions");
+      return;
+    }
     if (view !== "board") return;
+
+    if (selectedId === null && /^[0-9]$/.test(e.key) && chipRepos.length > 1) {
+      const repo = chipRepos[Number(e.key) - 1];
+      if (e.key === "0") changeRepoFilter([]);
+      else if (repo !== undefined) changeRepoFilter(toggleRepo(shownRepos, repo));
+      return;
+    }
 
     // On the full board j/k only move the highlight; inside a PR they switch PRs.
     const onBoard = selectedId === null;
@@ -696,6 +1273,17 @@ export function App(): ReactElement {
     }
   };
   const dockOpen = inDetail && session !== undefined;
+  // Mission parts show under their mission's chip, not one by one.
+  const looseTasks = Object.values(tasks).filter((t): boolean => t.mission === undefined);
+  const hasTasks = looseTasks.length > 0;
+  const runningMissions = missions.filter((m): boolean => m.phase === "running").length;
+  // The radar follows the repo filter like the board does.
+  const inShown = (repo: string): boolean => shownRepos.length === 0 || shownRepos.includes(repo);
+  const shownRadar: Radar = {
+    branches: radar.branches.filter((b): boolean => inShown(b.repo)),
+    broken: radar.broken.filter((b): boolean => inShown(b.repo)),
+  };
+  const hasRadar = shownRadar.branches.length > 0 || shownRadar.broken.length > 0;
   const agentStates = new Map(
     Object.entries(sessions).flatMap(([key, s]): [string, AgentState][] =>
       s.status === "preparing"
@@ -706,6 +1294,40 @@ export function App(): ReactElement {
     ),
   );
   const mainClass = ["main", inDetail ? "is-detail" : "", dockOpen ? "has-dock" : ""].filter(Boolean).join(" ");
+
+  // The PR above keeps at least DOCK_MIN_ABOVE px; the terminal at least DOCK_MIN px.
+  const clampDock = (height: number, main: Element): number =>
+    Math.round(Math.min(Math.max(height, DOCK_MIN), main.getBoundingClientRect().height - DOCK_MIN_ABOVE));
+  const resizeDock = (e: React.PointerEvent<HTMLDivElement>): void => {
+    const main = e.currentTarget.closest(".main");
+    if (main === null) return;
+    e.preventDefault();
+    const grip = e.currentTarget;
+    grip.setPointerCapture(e.pointerId);
+    setDockDragging(true);
+    let last = dockHeight;
+    const move = (ev: PointerEvent): void => {
+      last = clampDock(main.getBoundingClientRect().bottom - ev.clientY, main);
+      setDockHeight(last);
+    };
+    const up = (): void => {
+      grip.removeEventListener("pointermove", move);
+      grip.removeEventListener("pointerup", up);
+      setDockDragging(false);
+      if (last !== null) void saveValue("dockHeight", last);
+    };
+    grip.addEventListener("pointermove", move);
+    grip.addEventListener("pointerup", up);
+  };
+  const nudgeDock = (e: React.KeyboardEvent<HTMLDivElement>): void => {
+    const main = e.currentTarget.closest(".main");
+    const dock = e.currentTarget.parentElement;
+    if (main === null || dock === null || (e.key !== "ArrowUp" && e.key !== "ArrowDown")) return;
+    e.preventDefault();
+    const next = clampDock(dock.getBoundingClientRect().height + (e.key === "ArrowUp" ? DOCK_STEP : -DOCK_STEP), main);
+    setDockHeight(next);
+    void saveValue("dockHeight", next);
+  };
 
   return (
     <div className="app">
@@ -758,6 +1380,16 @@ export function App(): ReactElement {
             <Bell size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Novidades</span>
             {unread > 0 && <span className="band-count">{unread}</span>}
           </button>
+          <button
+            type="button"
+            className="text-button"
+            disabled={hasToken !== true}
+            title="Issues atribuídas a você (I)"
+            onClick={(): void => setIssuesOpen(true)}
+          >
+            <CircleDot size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Issues</span>
+            {issues !== null && issues.length > 0 && <span className="band-count muted">{issues.length}</span>}
+          </button>
           {snoozedCount > 0 && (
             <button
               type="button"
@@ -790,6 +1422,17 @@ export function App(): ReactElement {
             onClick={(): void => setView(view === "tree" ? "board" : "tree")}
           >
             <GitGraph size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Árvore</span>
+          </button>
+          <button
+            type="button"
+            className="text-button"
+            aria-pressed={view === "missions"}
+            disabled={hasToken !== true}
+            title="Missões: uma mudança em vários repos, um agente por repo (M)"
+            onClick={(): void => setView(view === "missions" ? "board" : "missions")}
+          >
+            <Workflow size={15} strokeWidth={2} aria-hidden /> <span className="band-label">Missões</span>
+            {runningMissions > 0 && <span className="band-count muted">{runningMissions}</span>}
           </button>
           <button
             type="button"
@@ -842,8 +1485,39 @@ export function App(): ReactElement {
       {newTaskOpen && (
         <NewTaskDialog
           repos={knownRepos}
-          onClose={(): void => setNewTaskOpen(false)}
-          onCreate={(repo, branch, text): void => void createTask(repo, branch, text)}
+          seed={taskSeed}
+          onClose={(): void => {
+            setNewTaskOpen(false);
+            setTaskSeed(null);
+          }}
+          onCreate={(repo, branch, text, issue): void => void createTask(repo, branch, text, issue)}
+        />
+      )}
+
+      {newMissionOpen && (
+        <NewMissionDialog
+          repos={knownRepos}
+          onClose={(): void => setNewMissionOpen(false)}
+          onCreate={(request, repos): void => void createMission(request, repos)}
+        />
+      )}
+
+      {issuesOpen && (
+        <IssuesDialog
+          issues={issues}
+          error={issuesError}
+          onStart={startIssue}
+          onOpenUrl={(url): void => void openUrl(url)}
+          onClose={(): void => setIssuesOpen(false)}
+        />
+      )}
+
+      {stray !== null && (
+        <BranchPrDialog
+          config={config}
+          branch={stray}
+          onCreated={(number): void => void branchOpened(stray, number)}
+          onClose={(): void => setStray(null)}
         />
       )}
 
@@ -860,7 +1534,10 @@ export function App(): ReactElement {
         />
       )}
 
-      <main className={mainClass}>
+      <main
+        className={mainClass}
+        {...(dockHeight === null ? {} : { style: { ["--dock" as string]: `${dockHeight}px` } })}
+      >
         {view === "settings" && (
           <Settings
             config={config}
@@ -885,24 +1562,94 @@ export function App(): ReactElement {
           />
         )}
 
+        {view === "missions" && (
+          <MissionsView
+            missions={missions}
+            selectedId={openMissionId}
+            plans={missionPlans}
+            notes={partNotes}
+            checks={missionChecks}
+            partStatus={partStatus}
+            canPlan={(currentAgent()?.headless.trim() ?? "") !== ""}
+            onSelect={setOpenMissionId}
+            onNew={(): void => setNewMissionOpen(true)}
+            onSavePlan={writePlan}
+            onReloadPlan={(id): void => void readPlan(id)}
+            onReveal={(id): void => {
+              if (config === null) return;
+              void missionPlanPath(config.workspaceDir, id).then(revealItemInDir);
+            }}
+            onReplan={(id): void => void replanMission(id)}
+            onLaunch={(id): void => void launchMission(id)}
+            onPropagate={(id): void => void propagatePlan(id)}
+            onCheck={(id): void => void checkMission(id)}
+            onDeliver={(id): void => void deliverMission(id)}
+            onOpenPr={(repo, number): void => {
+              setView("board");
+              void openRef({ repo, number });
+            }}
+            onOpenPart={(taskId): void => {
+              setView("board");
+              navigate(taskId);
+            }}
+          />
+        )}
+
         {view === "tree" && (
           <TreeView pulls={pulls ?? []} onOpenPr={(repo, number): void => void openRef({ repo, number })} />
         )}
 
-        {view === "board" && !inDetail && Object.keys(tasks).length > 0 && (
-          <nav className="tasks-strip" aria-label="Tarefas em andamento">
-            <span className="tasks-label">Em andamento</span>
-            {Object.values(tasks).map(
-              (t): ReactElement => (
-                <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
-                  <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
-                  <span className="task-repo">{t.repo}</span>
-                  <span className="task-text">{t.text}</span>
-                  {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
-                </button>
-              ),
+        {view === "board" && !inDetail && (hasTasks || hasRadar || chipRepos.length > 1 || runningMissions > 0) && (
+          <div className="strips">
+            {runningMissions > 0 && (
+              <nav className="tasks-strip" aria-label="Missões em andamento">
+                <span className="tasks-label">Missões</span>
+                {missions
+                  .filter((m): boolean => m.phase === "running")
+                  .map((m): ReactElement => {
+                    const waiting = m.parts.filter((p): boolean =>
+                      ["contract", "waiting", "error"].includes(partStatus(m, p)),
+                    ).length;
+                    return (
+                      <button
+                        key={m.id}
+                        type="button"
+                        className={waiting > 0 ? "task-chip is-bad" : "task-chip"}
+                        onClick={(): void => {
+                          setOpenMissionId(m.id);
+                          setView("missions");
+                        }}
+                      >
+                        <Workflow size={14} strokeWidth={2} aria-hidden />
+                        <span className="task-text">{m.title}</span>
+                        <span className="task-live">
+                          {waiting > 0 ? `${waiting} aguardando você` : `${m.parts.length} repos`}
+                        </span>
+                      </button>
+                    );
+                  })}
+              </nav>
             )}
-          </nav>
+            {hasTasks && (
+              <nav className="tasks-strip" aria-label="Tarefas em andamento">
+                <span className="tasks-label">Em andamento</span>
+                {looseTasks.map(
+                  (t): ReactElement => (
+                    <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
+                      <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
+                      <span className="task-repo">{t.repo}</span>
+                      <span className="task-text">{t.text}</span>
+                      {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
+                    </button>
+                  ),
+                )}
+              </nav>
+            )}
+            {hasRadar && (
+              <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenUrl={(url): void => void openUrl(url)} />
+            )}
+            {chipRepos.length > 1 && <RepoFilter orgs={repoOrgs} filter={shownRepos} onChange={changeRepoFilter} />}
+          </div>
         )}
 
         {view === "board" && !inDetail && (
@@ -920,9 +1667,19 @@ export function App(): ReactElement {
         {inDetail && selectedTask !== undefined && selected === null && (
           <>
             <aside className="rail-wrap">
-              <button type="button" className="back" onClick={(): void => navigate(null)}>
+              <button
+                type="button"
+                className="back"
+                onClick={(): void => {
+                  navigate(null);
+                  if (selectedTask.mission !== undefined) {
+                    setOpenMissionId(selectedTask.mission);
+                    setView("missions");
+                  }
+                }}
+              >
                 <ArrowLeft size={20} strokeWidth={2.5} aria-hidden />
-                <span>Voltar ao quadro</span>
+                <span>{selectedTask.mission === undefined ? "Voltar ao quadro" : "Voltar à missão"}</span>
                 <kbd>Esc</kbd>
               </button>
               <Board groups={groups} deps={deps} loading={false} selectedId={null} rail onSelect={navigate} />
@@ -987,6 +1744,21 @@ export function App(): ReactElement {
         )}
 
         <section className="dock" hidden={!dockOpen} aria-label="Terminal do agente">
+          {/* biome-ignore lint/a11y/useSemanticElements: a focusable splitter is an ARIA separator; <hr> cannot take drag or keys */}
+          <div
+            className={dockDragging ? "dock-grip is-dragging" : "dock-grip"}
+            role="separator"
+            aria-orientation="horizontal"
+            aria-label="Redimensionar o terminal (setas para cima e para baixo)"
+            aria-valuenow={dockHeight ?? undefined}
+            tabIndex={0}
+            onPointerDown={resizeDock}
+            onKeyDown={nudgeDock}
+            onDoubleClick={(): void => {
+              setDockHeight(null);
+              void saveValue("dockHeight", null);
+            }}
+          />
           {selectedId !== null && session !== undefined && (
             <div className="term-bar">
               <span className="term-title">

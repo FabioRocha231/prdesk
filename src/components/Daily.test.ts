@@ -11,7 +11,7 @@ describe("previousWorkday", () => {
 });
 
 describe("standupText", () => {
-  const item = { repo: "acme/api", number: 7, title: "Fix login", url: "u" };
+  const item = { repo: "acme/api", number: 7, title: "Fix login", url: "u", deploys: [] };
   const stuck = {
     pr: { repo: "acme/web", number: 9, title: "Cart", isDraft: false, updatedAt: "2026-10-20T10:00:00Z" },
     triage: { at: "2026-10-20T10:00:00Z" },
@@ -24,6 +24,19 @@ describe("standupText", () => {
     expect(text).toContain("Revisei:");
     expect(text).not.toContain("Abri:");
     expect(text).toContain("Travado esperando review:\n- acme/web#9 Cart");
+  });
+
+  it("says where a merge is deployed", () => {
+    const shipped = {
+      ...item,
+      deploys: [
+        { environment: "production", state: "SUCCESS" },
+        { environment: "staging", state: "FAILURE" },
+      ],
+    };
+    expect(standupText({ merged: [shipped], opened: [], reviewed: [] }, [])).toContain(
+      "- acme/api#7 Fix login (production ✓, staging ✗)",
+    );
   });
 
   it("says so when nothing happened", () => {

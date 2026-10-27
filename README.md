@@ -19,6 +19,9 @@ The UI is in Brazilian Portuguese for now (*Sua vez* = your turn).
 - **Open in your agent.** Pick Claude Code, Codex or OpenCode, or add your own, and press `c`. prdesk clones the repo once into `~/PRDesk`, creates a worktree for the PR's branch, and starts the agent in an embedded terminal with the context already in the prompt. The card shows whether the agent is working or waiting on you, and a notification tells you when it goes quiet.
 - **AI on the side.** Analyze a PR (summary, risks, draft comments), draft replies, rewrite descriptions, or describe a task and get a new branch, the agent's work and a written PR.
 - **Less to keep in your head.** *Novidades* (GitHub notifications), *Encadeadas* (PRs that declare "Depends on org/repo#123", in merge order), snooze until tomorrow, Monday or the next change, a daily summary to paste, auto-merge once CI passes, and a tray icon with your my-turn count.
+- **What happens outside the PRs.** Branches you pushed in the last 14 days without a PR show above the board and open one in a click; a red default branch is flagged so a failing CI elsewhere makes sense; *Issues* lists what is assigned to you, and starting one hands it to the agent with a PR that closes it. The daily summary says where each merged PR is deployed.
+- **Fewer trips to GitHub.** Commit a reviewer's suggestion from its thread, re-request review once you pushed the changes, nudge reviewers when a PR sits for days, filter the board by org or repo, and edit labels and assignees or close a PR from *Mais*.
+- **Missions across repos.** Describe a change that spans several repos: prdesk prepares a worktree per repo, a headless agent writes `plan.md` with the contract between them, you review it, and one agent per repo starts in parallel. The plan is a plain file under `~/PRDesk/missions/`. See [the design](docs/design/missions.md).
 - **Housekeeping.** Settings finds worktrees of closed PRs and removes the ones with nothing unsaved in them.
 
 ### How "whose turn" is decided
@@ -40,8 +43,11 @@ Someone else's PR goes to *Review pedido* when you are a requested reviewer, or 
 | `o` | Open the selected PR on GitHub |
 | `⌘K` / `Ctrl+K` | Search PRs |
 | `n` | Novidades (notifications) |
+| `i` | Issues assigned to you |
+| `1`–`9` / `0` | Filter the board by repo / show all |
 | `p` | New PR with the agent |
 | `t` | Branch tree |
+| `m` | Missions |
 | `r` | Refresh |
 | `,` | Settings |
 | `?` | Help |

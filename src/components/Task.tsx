@@ -6,6 +6,7 @@ import { DESCRIBE_PROMPT, readDescription } from "../lib/ai";
 import type { Config } from "../lib/config";
 import { createPull } from "../lib/github";
 import { type Changes, commitAndPush, errorMessage, worktreeChanges } from "../lib/ipc";
+import { slugify } from "../lib/mission";
 import { splitDiff } from "./Changes";
 import type { PrAi } from "./Detail";
 import { DiffLines } from "./Threads";
@@ -14,7 +15,6 @@ import { useAction } from "./useAction";
 const MAX_TASK = 4000;
 const MAX_TITLE = 256;
 const MAX_BODY = 65_000;
-const SLUG_WORDS = 6;
 
 /** Work that has no PR yet: a branch and worktree where an agent builds it. */
 export interface Task {
@@ -25,36 +25,40 @@ export interface Task {
   text: string;
   /** Set once the worktree exists. */
   cwd: string | null;
+  /** The issue this task resolves, in the same repo; the PR closes it. */
+  issue?: number;
+  /** Set when the task is one repo's part of a mission. */
+  mission?: string;
+}
+
+/** What the dialog starts with when the task comes from an issue. */
+export interface TaskSeed {
+  repo: string;
+  text: string;
+  branch: string;
+  issue: number;
 }
 
 /** "Add retry to the webhook sender" → "prdesk/add-retry-to-the-webhook-sender". */
 export function branchFor(text: string): string {
-  const slug = text
-    .normalize("NFD")
-    .replace(/[̀-ͯ]/g, "")
-    .toLowerCase()
-    .replace(/[^a-z0-9]+/g, " ")
-    .trim()
-    .split(" ")
-    .filter(Boolean)
-    .slice(0, SLUG_WORDS)
-    .join("-");
-  return `prdesk/${slug === "" ? "task" : slug}`;
+  return `prdesk/${slugify(text) || "task"}`;
 }
 
 export function NewTaskDialog({
   repos,
+  seed,
   onCreate,
   onClose,
 }: {
   repos: string[];
-  onCreate: (repo: string, branch: string, text: string) => void;
+  seed: TaskSeed | null;
+  onCreate: (repo: string, branch: string, text: string, issue?: number) => void;
   onClose: () => void;
 }): ReactElement {
   const dialog = useRef<HTMLDialogElement>(null);
-  const [repo, setRepo] = useState(repos[0] ?? "");
-  const [text, setText] = useState("");
-  const [branch, setBranch] = useState<string | null>(null);
+  const [repo, setRepo] = useState(seed?.repo ?? repos[0] ?? "");
+  const [text, setText] = useState(seed?.text ?? "");
+  const [branch, setBranch] = useState<string | null>(seed?.branch ?? null);
   const finalBranch = branch ?? branchFor(text);
   const repoOk = /^[A-Za-z0-9-]+\/[A-Za-z0-9._-]+$/.test(repo);
   const valid = repoOk && text.trim() !== "" && finalBranch !== "";
@@ -82,7 +86,8 @@ export function NewTaskDialog({
         className="newtask-form"
         onSubmit={(e): void => {
           e.preventDefault();
-          if (valid) onCreate(repo, finalBranch, text.trim());
+          // The issue only links when the task stays in its repo.
+          if (valid) onCreate(repo, finalBranch, text.trim(), seed?.repo === repo ? seed.issue : undefined);
         }}
       >
         <div className="palette-input">
@@ -195,7 +200,8 @@ export function TaskView({
     if (cwd === null) return;
     await action.run("open", async (): Promise<void> => {
       await commitAndPush(cwd, config.workspaceDir, title.trim(), task.repoUrl);
-      const created = await createPull(config, task.repo, task.branch, title.trim(), body, draft);
+      const closes = task.issue === undefined || body.includes(`#${task.issue}`) ? "" : `\n\nCloses #${task.issue}`;
+      const created = await createPull(config, task.repo, task.branch, title.trim(), `${body}${closes}`.trim(), draft);
       onCreated(created);
     });
   };

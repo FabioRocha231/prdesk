@@ -1,11 +1,11 @@
-import { Bot, Check, ChevronDown, ChevronRight, MessageSquareReply, Sparkles } from "lucide-react";
+import { Bot, Check, ChevronDown, ChevronRight, GitCommitHorizontal, MessageSquareReply, Sparkles } from "lucide-react";
 import type { KeyboardEvent, ReactElement } from "react";
 import { useState } from "react";
 
 import { type Config, contextPrompt, threadPrompt } from "../lib/config";
 import { numberHunk } from "../lib/diff";
 import { age } from "../lib/format";
-import { replyToThread, resolveThread } from "../lib/github";
+import { commitSuggestion, replyToThread, resolveThread } from "../lib/github";
 import type { Comment, PullDetail, PullRequest, Thread } from "../lib/model";
 import { CodeText, useDiffTokens } from "./Code";
 import { Html } from "./Html";
@@ -18,6 +18,8 @@ const VISIBLE_REPLIES = 2;
 const PEEK_LENGTH = 140;
 const AVATAR_SIZE = 48;
 const MAX_REPLY = 65_000;
+// ponytail: forks are left out even when maintainers may edit them; the agent covers that case.
+export const PUSH_ROLES = new Set(["WRITE", "MAINTAIN", "ADMIN"]);
 
 export function threadId(id: string): string {
   return `thread-${id.replace(/[^A-Za-z0-9_-]/g, "")}`;
@@ -220,6 +222,7 @@ function ThreadCard({
   config,
   thread,
   waiting,
+  canPush,
   agentBlocked,
   draftReply,
   onAgent,
@@ -230,6 +233,8 @@ function ThreadCard({
   config: Config;
   thread: Thread;
   waiting: boolean;
+  /** The viewer can push to the PR branch, so a suggestion can be committed from here. */
+  canPush: boolean;
   agentBlocked: boolean;
   draftReply: ReplyDrafter;
   onAgent: (prompt: string, context?: string) => void;
@@ -249,6 +254,10 @@ function ThreadCard({
 
   const resolve = async (): Promise<void> => {
     if (await action.run("resolve", async (): Promise<void> => await resolveThread(config, thread.id))) onChanged();
+  };
+
+  const apply = async (): Promise<void> => {
+    if (await action.run("apply", async (): Promise<void> => await commitSuggestion(config, pr, thread))) onChanged();
   };
 
   const fixWithAgent = (): void => {
@@ -350,6 +359,18 @@ function ThreadCard({
               />
             ) : (
               <div className="thread-actions">
+                {canPush && thread.suggestion !== null && thread.range !== undefined && (
+                  <button
+                    type="button"
+                    className="link-button good"
+                    disabled={action.pending !== null}
+                    title="Faz um commit com a sugestão na branch da PR e resolve a conversa"
+                    onClick={(): void => void apply()}
+                  >
+                    <GitCommitHorizontal size={14} strokeWidth={2} aria-hidden />
+                    {action.pending === "apply" ? "Aplicando…" : "Aplicar sugestão"}
+                  </button>
+                )}
                 <button type="button" className="link-button" onClick={(): void => setReplying(true)}>
                   <MessageSquareReply size={14} strokeWidth={2} aria-hidden /> Responder
                 </button>
@@ -436,6 +457,7 @@ export function ThreadsTab({
   onChanged: () => void;
 }): ReactElement {
   const prIsMine = pr.author === me;
+  const canPush = !pr.isCrossRepository && pr.closed === undefined && PUSH_ROLES.has(detail.permission);
   const waiting = new Set(detail.threads.filter((t): boolean => waitsOnMe(t, me, prIsMine)).map((t): string => t.id));
   // Human threads waiting on me first, then the other open ones; bot threads and resolved ones fold away.
   const open = detail.threads
@@ -468,6 +490,7 @@ export function ThreadsTab({
       config={config}
       thread={t}
       waiting={waiting.has(t.id)}
+      canPush={canPush}
       agentBlocked={agentBlocked}
       draftReply={draftReply}
       onAgent={onAgent}
