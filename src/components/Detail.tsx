@@ -909,7 +909,6 @@ export function Detail({
           },
     [loaded, resolvedHere],
   );
-  // An approval older than the last commit does not cover the new code: approving again is a real choice then.
   // An approval older than the last commit does not cover the new code (facts.ts): approving again is a real choice.
   const approved = approvedHere || prFacts(pr, me).myApprovalHolds;
   const resolve = async (thread: Thread): Promise<void> => {
