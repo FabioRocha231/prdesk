@@ -919,7 +919,15 @@ export function Detail({
           },
     [loaded, resolvedHere],
   );
-  const approved = approvedHere || pr.reviews.some((r): boolean => r.author === me && r.state === "APPROVED");
+  // An approval older than the last commit does not cover the new code: approving again is a real choice then.
+  const approved =
+    approvedHere ||
+    pr.reviews.some(
+      (r): boolean =>
+        r.author === me &&
+        r.state === "APPROVED" &&
+        (pr.lastCommitAt === null || Date.parse(r.submittedAt) >= Date.parse(pr.lastCommitAt)),
+    );
   const resolve = async (thread: Thread): Promise<void> => {
     setResolveError(null);
     setResolvedHere((s): ReadonlySet<string> => new Set(s).add(thread.id));
