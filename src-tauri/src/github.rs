@@ -239,6 +239,8 @@ pub struct Activity {
     updated_at: String,
     actor: Option<String>,
     body: Option<String>,
+    /// Database id of the comment or review the notification points at, so the app can scroll to it.
+    comment_id: Option<u64>,
 }
 
 #[derive(serde::Serialize)]
@@ -266,6 +268,11 @@ async fn latest_comment(token: &str, api_url: &str, url: &str) -> Option<(String
         .take(MAX_BODY)
         .collect();
     Some((actor, text))
+}
+
+/// The trailing number of a comment or review API URL (`…/issues/comments/123`, `…/pulls/1/reviews/9`).
+fn comment_id(url: &str) -> Option<u64> {
+    url.rsplit('/').next()?.parse().ok()
 }
 
 /// New pull-request notifications (the same feed GitHub Mobile pushes) updated after `since`.
@@ -371,6 +378,7 @@ pub async fn github_notifications(
             updated_at: t["updated_at"].as_str().unwrap_or_default().to_owned(),
             actor,
             body: text,
+            comment_id: comment.and_then(comment_id),
         });
     }
     Ok(Inbox {
@@ -397,5 +405,17 @@ mod tests {
         assert!(valid_rest_path("/repos/acme/api/actions/jobs/12/logs"));
         assert!(!valid_rest_path("/repos/../user"));
         assert!(!valid_rest_path("/user"));
+    }
+
+    #[test]
+    fn reads_the_comment_id_from_its_url() {
+        assert_eq!(
+            comment_id("https://api.github.com/repos/acme/api/issues/comments/123"),
+            Some(123)
+        );
+        assert_eq!(
+            comment_id("https://api.github.com/repos/acme/api/pulls/comments/"),
+            None
+        );
     }
 }

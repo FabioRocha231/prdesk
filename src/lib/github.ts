@@ -76,11 +76,11 @@ const DETAIL_QUERY = `query($id: ID!) {
       reviewThreads(first: 100) {
         nodes {
           id isResolved isOutdated path line originalLine startLine
-          comments(first: 50) { nodes { id author { __typename login avatarUrl } body bodyHTML createdAt diffHunk } }
+          comments(first: 50) { nodes { id databaseId author { __typename login avatarUrl } body bodyHTML createdAt diffHunk } }
         }
       }
-      comments(last: 100) { nodes { id author { __typename login avatarUrl } bodyHTML createdAt } }
-      reviews(last: 100) { nodes { id author { __typename login avatarUrl } state bodyHTML submittedAt } }
+      comments(last: 100) { nodes { id databaseId author { __typename login avatarUrl } bodyHTML createdAt } }
+      reviews(last: 100) { nodes { id databaseId author { __typename login avatarUrl } state bodyHTML submittedAt } }
     }
   }
 }`;
@@ -423,6 +423,7 @@ export async function fetchPull(config: Config, repo: string, number: number): P
 
 interface RawComment {
   id: string;
+  databaseId: number;
   author: (Login & { avatarUrl: string; __typename: string }) | null;
   bodyHTML: string;
   createdAt: string;
@@ -504,6 +505,7 @@ const GHOST = "ghost";
 function toComment(raw: RawComment): Comment {
   return {
     id: raw.id,
+    databaseId: raw.databaseId,
     author: raw.author?.login ?? GHOST,
     avatarUrl: raw.author?.avatarUrl ?? "",
     bodyHTML: raw.bodyHTML,

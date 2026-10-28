@@ -49,6 +49,10 @@ const GUIDE: { title: string; items: [string, string][] }[] = [
     items: [
       ["Analisar", "em Arquivos: resumo, riscos e comentários de rascunho para você revisar."],
       ["Resolver tudo", "na sua PR: o agente ataca os comentários pendentes e o CI de uma vez."],
+      [
+        "Aplicar comentários com IA",
+        "em Mais, na sua PR: o agente confere cada ponto dos revisores no código, aplica o que procede e lista o que é decisão sua.",
+      ],
       ["Rascunhar com IA", "ao responder um comentário, a IA escreve e você só ajusta."],
       ["Nova PR", "descreva a tarefa; o agente implementa numa branch nova e a IA escreve a PR."],
     ],

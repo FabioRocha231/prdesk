@@ -47,10 +47,11 @@ import {
   DESCRIBE_PROMPT,
   diffContext,
   REPLY_PROMPT,
-  REVIEW_PROMPT,
   readDescription,
   readReview,
   replyContext,
+  reviewPrompt,
+  type Said,
   stripFence,
 } from "./lib/ai";
 import {
@@ -59,6 +60,7 @@ import {
   agentFor,
   agentPrompt,
   type Config,
+  clampZoom,
   contextPrompt,
   headlessCommand,
   loadConfig,
@@ -100,6 +102,7 @@ import {
   ptySpawn,
   ptyWrite,
   readAgentNotes,
+  setZoom,
   tokenStatus,
   worktreeChanges,
   writeAgentContext,
@@ -218,6 +221,9 @@ export function App(): ReactElement {
   // PRs opened from the feed that are not on the board (closed, merged, or outside the scopes).
   const [extra, setExtra] = useState<Record<string, PullRequest>>({});
   const [feedOpen, setFeedOpen] = useState(false);
+  // The comment a picked notification points at, until its PR shows it.
+  const [focus, setFocus] = useState<(PrRef & { commentId: number }) | null>(null);
+  const clearFocus = useCallback((): void => setFocus(null), []);
   const [feedSeenAt, setFeedSeenAt] = useState((): number => Date.now());
   // Review drafts and AI results live here so they survive switching PRs.
   const [drafts, setDrafts] = useState<Record<string, DraftComment[]>>({});
@@ -584,8 +590,25 @@ export function App(): ReactElement {
     const id = item.pr.id;
     setAiStates((a) => ({ ...a, [id]: { status: "running" } }));
     try {
-      const body = state?.status === "ready" ? state.detail.body : "";
-      const output = await ai.run(REVIEW_PROMPT, diffContext(item.pr, body, files));
+      const detail = state?.status === "ready" ? state.detail : null;
+      // What reviewers already said goes along, so the analysis does not raise the same points again.
+      const said: Said[] = [
+        ...(detail?.threads ?? []).flatMap((t): Said[] =>
+          t.comments.map(
+            (c): Said => ({
+              author: c.author,
+              where: t.line === null ? t.path : `${t.path}:${t.line}`,
+              resolved: t.isResolved,
+              text: htmlToText(c.bodyHTML),
+            }),
+          ),
+        ),
+        ...(detail?.timeline ?? []).map(
+          (c): Said => ({ author: c.author, where: null, resolved: false, text: htmlToText(c.bodyHTML) }),
+        ),
+      ];
+      const prompt = reviewPrompt(agentForRepo(item.pr.repo)?.reviewCommand ?? "");
+      const output = await ai.run(prompt, diffContext(item.pr, detail?.body ?? "", files, said));
       const { review, comments } = readReview(output, files);
       setAiStates((a) => ({ ...a, [id]: { status: "done", review } }));
       // A new pass replaces the previous AI suggestions and keeps everything I wrote.
@@ -1145,6 +1168,18 @@ export function App(): ReactElement {
     });
   };
 
+  const zoom = config?.zoom ?? 1;
+  useEffect((): void => {
+    setZoom(zoom).catch((): void => console.warn("[App.zoom] setZoom failed"));
+  }, [zoom]);
+
+  const changeZoom = (next: number): void => {
+    if (config === null) return;
+    const updated = { ...config, zoom: clampZoom(next) };
+    setConfig(updated);
+    void saveConfig(updated);
+  };
+
   const saveSettings = async (next: Config): Promise<void> => {
     const saved = await saveConfig(next);
     setConfig(saved);
@@ -1194,7 +1229,10 @@ export function App(): ReactElement {
   // Feed items open in the app: from the board when the PR is there, otherwise fetched on their own.
   const pickActivity = async (a: Activity): Promise<void> => {
     closeFeed();
-    if (a.number !== null) await openRef({ repo: a.repo, number: a.number });
+    if (a.number === null) return;
+    const ref = { repo: a.repo, number: a.number };
+    setFocus(a.commentId === null ? null : { ...ref, commentId: a.commentId });
+    await openRef(ref);
   };
 
   // Opens a PR by repo and number: from the board when it is there, otherwise fetched on its own.
@@ -1222,6 +1260,15 @@ export function App(): ReactElement {
       e.preventDefault();
       setPaletteOpen(true);
       return;
+    }
+    // ⌘= / ⌘- / ⌘0 scale the whole interface, like a browser.
+    if (e.metaKey || e.ctrlKey) {
+      const step = { "=": 0.1, "+": 0.1, "-": -0.1 }[e.key];
+      if (step !== undefined || e.key === "0") {
+        e.preventDefault();
+        changeZoom(step === undefined ? 1 : zoom + step);
+        return;
+      }
     }
     const dialogOpen =
       paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen || issuesOpen || newMissionOpen || stray !== null;
@@ -1881,6 +1928,8 @@ export function App(): ReactElement {
               <Detail
                 key={selected.pr.id}
                 item={selected}
+                focusComment={focus !== null && refKey(focus) === refKey(selected.pr) ? focus.commentId : null}
+                onFocused={clearFocus}
                 me={me ?? ""}
                 config={config}
                 state={details[selected.pr.id] ?? { status: "loading" }}

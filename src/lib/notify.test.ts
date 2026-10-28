@@ -16,6 +16,7 @@ const activity: Activity = {
   updatedAt: "2026-10-26T15:16:00Z",
   actor: "lipedrumond",
   body: "<!-- template -->\n## O que muda\n\nFaxina do lado do **saas**.",
+  commentId: null,
 };
 
 suite("excerpt", () => {

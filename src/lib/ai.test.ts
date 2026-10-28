@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { parseJson, readReview, stripFence } from "./ai";
+import { diffContext, parseJson, REVIEW_PROMPT, readReview, reviewPrompt, stripFence } from "./ai";
 import type { PrFile } from "./model";
 
 const file: PrFile = {
@@ -50,5 +50,33 @@ describe("stripFence", () => {
   it("unwraps a fenced answer", () => {
     expect(stripFence("```markdown\nOi\n```")).toBe("Oi");
     expect(stripFence("  Oi  ")).toBe("Oi");
+  });
+});
+
+describe("diffContext", () => {
+  it("lists what reviewers already said before the diff", () => {
+    const pr = { repo: "acme/api", number: 7, title: "Retry", author: "you" } as Parameters<typeof diffContext>[0];
+    const text = diffContext(
+      pr,
+      "body",
+      [file],
+      [
+        { author: "maria", where: "src/a.ts:11", resolved: true, text: "Por que new?" },
+        { author: "joao", where: null, resolved: false, text: "Falta teste." },
+      ],
+    );
+    expect(text).toContain("**maria** on src/a.ts:11 (resolved):\nPor que new?");
+    expect(text).toContain("**joao** on conversation:\nFalta teste.");
+    expect(text.indexOf("Already said")).toBeLessThan(text.indexOf("## Changed files"));
+  });
+});
+
+describe("reviewPrompt", () => {
+  it("uses the app's prompt without a command and the agent's command when set", () => {
+    expect(reviewPrompt(" ")).toBe(REVIEW_PROMPT);
+    const custom = reviewPrompt("/review-fabio-1");
+    expect(custom.startsWith("/review-fabio-1 the pull request")).toBe(true);
+    expect(custom).toContain("Already said by reviewers");
+    expect(custom).toContain('"comments"');
   });
 });

@@ -48,7 +48,7 @@ import {
 } from "../lib/github";
 import { repoColor } from "../lib/holders";
 import { errorMessage, rerunFailedJobs, saveCiLog } from "../lib/ipc";
-import type { DraftComment, PrFile, PullDetail, PullRequest, Thread, TriagedPull } from "../lib/model";
+import type { Comment, DraftComment, PrFile, PullDetail, PullRequest, Thread, TriagedPull } from "../lib/model";
 import { type NextStep, nextStep } from "../lib/nextStep";
 import { transitionName } from "./Board";
 import { ChangesTab } from "./Changes";
@@ -124,10 +124,12 @@ function ConversationTab({
   prAuthor,
   me,
   detail,
+  focusId,
   onChanged,
 }: {
   config: Config;
   prId: string;
+  focusId: string | null;
   prAuthor: string | null;
   me: string;
   detail: PullDetail;
@@ -149,6 +151,7 @@ function ConversationTab({
       comment={c}
       prAuthor={prAuthor}
       me={me}
+      focused={c.id === focusId}
       {...(c.reviewState === null ? {} : { note: REVIEW_NOTE[c.reviewState] ?? "" })}
     />
   );
@@ -157,7 +160,7 @@ function ConversationTab({
       {people.length === 0 && <p className="notice">Sem comentários de pessoas.</p>}
       {people.map(view)}
       {bots.length > 0 && (
-        <details className="fold">
+        <details className="fold" open={bots.some((c): boolean => c.id === focusId) || undefined}>
           <summary>
             Comentários de bots <b>{bots.length}</b>
           </summary>
@@ -411,6 +414,30 @@ function ActionBar({
     });
   };
 
+  // What other people raised that is still open: unresolved threads plus the PR conversation.
+  const feedback = [
+    ...(detail?.threads ?? [])
+      .filter((t): boolean => !t.isResolved && t.comments.some((c): boolean => !sameLogin(c.author, me)))
+      .map((t): string =>
+        [
+          `## Review thread on ${t.path}${t.line === null ? "" : `:${t.line}`}`,
+          ...t.comments.map((c): string => `**${c.author}:** ${htmlToText(c.bodyHTML)}`),
+        ].join("\n"),
+      ),
+    ...(detail?.timeline ?? [])
+      .filter((c): boolean => !c.isBot && !sameLogin(c.author, me))
+      .map((c): string => `## Conversation comment by ${c.author} (${c.createdAt})\n${htmlToText(c.bodyHTML)}`),
+  ];
+  const applyFeedback = (): void =>
+    onOpenAgent(
+      contextPrompt(
+        `Go through the reviewer feedback on pull request ${pr.url} and check each point against the code in this worktree before touching anything. Fix only the points that hold; for the ones already done, outdated or wrong, change nothing and say why. When a point is a decision for me (an order, a trade-off, scope), do not decide it: list it as a question. When the description is asked to change, propose the new text. Run the relevant tests, then summarize per point: applied, skipped (why) or needs my decision. Do not push.`,
+      ),
+      [`# Reviewer feedback on ${pr.url}`, "", "## Current description", detail?.body ?? "", "", ...feedback].join(
+        "\n\n",
+      ),
+    );
+
   const actions: Record<Exclude<NextStep, null>, Action> = {
     "send-review": {
       key: "send-review",
@@ -512,6 +539,17 @@ function ActionBar({
   };
   if (!closed && detail !== null) {
     if (mine && (waiting.length > 0 || failing.length > 0)) add("pr", actions.autopilot, !agentBlocked);
+    if (mine && feedback.length > 0)
+      add(
+        "pr",
+        {
+          key: "apply-feedback",
+          label: `Aplicar comentários com IA (${feedback.length})`,
+          icon: <Wand2 size={15} strokeWidth={2} aria-hidden />,
+          run: applyFeedback,
+        },
+        !agentBlocked,
+      );
     if (detail.mergeable === "CONFLICTING") add("pr", actions.conflicts, !agentBlocked);
     if (mergeReady) add("pr", actions.merge);
     // Approved-but-waiting PRs merge themselves once CI passes, so nobody has to come back for them.
@@ -857,6 +895,8 @@ export function Detail({
   onOpenGithub,
   onDrafts,
   onAnalyze,
+  focusComment,
+  onFocused,
   onSnooze,
   onChanged,
 }: {
@@ -886,6 +926,9 @@ export function Detail({
   onDrafts: (next: DraftComment[]) => void;
   onAnalyze: (files: PrFile[]) => void;
   onSnooze: (choice: SnoozeChoice) => void;
+  /** Database id of a comment to open the PR on, from Novidades; `onFocused` once it is shown. */
+  focusComment: number | null;
+  onFocused: () => void;
   onChanged: () => void;
 }): ReactElement {
   const { pr, triage } = item;
@@ -926,6 +969,18 @@ export function Detail({
       setResolveError(`Não deu para resolver a conversa em ${thread.path}: ${errorMessage(e)}`);
     }
   };
+  // A cached detail can predate the comment, so the focus waits until a detail that holds it loads.
+  const [focusId, setFocusId] = useState<string | null>(null);
+  useEffect((): void => {
+    if (focusComment === null || detail === null) return;
+    const holds = (c: Comment): boolean => c.databaseId === focusComment;
+    const thread = detail.threads.find((t): boolean => t.comments.some(holds));
+    const target = (thread?.comments ?? detail.timeline).find(holds);
+    if (target === undefined) return;
+    setTab(thread === undefined ? "conversation" : "threads");
+    setFocusId(target.id);
+    onFocused();
+  }, [focusComment, detail, onFocused]);
   const openThreads = detail?.threads.filter((t): boolean => !t.isResolved) ?? [];
   const waitingIds = openThreads.filter((t): boolean => waitsOnMe(t, me, prIsMine)).map((t): string => t.id);
   const failing = detail?.checks.filter((c): boolean => c.state === "failure").length ?? 0;
@@ -1117,6 +1172,7 @@ export function Detail({
             agentBlocked={agentBlocked}
             draftReply={draftReply}
             resolveError={resolveError}
+            focusId={focusId}
             onResolve={(t): void => void resolve(t)}
             onAgent={onOpenAgent}
             onChanged={onChanged}
@@ -1131,6 +1187,7 @@ export function Detail({
               prAuthor={pr.author}
               me={me}
               detail={detail}
+              focusId={focusId}
               onChanged={onChanged}
             />
           </>

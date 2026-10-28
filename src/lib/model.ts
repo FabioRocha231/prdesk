@@ -148,6 +148,8 @@ export interface TriagedPull {
 
 export interface Comment {
   id: string;
+  /** GitHub's numeric id, the one notifications point at; absent in mock data. */
+  databaseId?: number;
   author: string;
   avatarUrl: string;
   bodyHTML: string;

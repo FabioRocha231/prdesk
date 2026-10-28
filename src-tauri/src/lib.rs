@@ -68,6 +68,12 @@ fn tray(app: &AppHandle) -> tauri::Result<()> {
     Ok(())
 }
 
+/// Scales the whole interface, for big monitors. A command of ours: the webview's own zoom permission was refused.
+#[tauri::command]
+fn set_zoom(window: tauri::WebviewWindow, zoom: f64) -> Result<(), String> {
+    window.set_zoom(zoom).map_err(|e| e.to_string())
+}
+
 /// Shows how many PRs are my turn next to the tray icon (title on macOS/Linux, tooltip everywhere).
 #[tauri::command]
 fn set_tray_count(app: AppHandle, count: u32) {
@@ -110,6 +116,7 @@ pub fn run() {
         .manage(pty::Sessions::default())
         .invoke_handler(tauri::generate_handler![
             set_tray_count,
+            set_zoom,
             auth::token_status,
             auth::save_token,
             auth::clear_token,

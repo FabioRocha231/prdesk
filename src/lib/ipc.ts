@@ -124,6 +124,10 @@ export async function ptyWrite(id: number, data: string): Promise<void> {
   await invoke("pty_write", { id, data });
 }
 
+export async function setZoom(zoom: number): Promise<void> {
+  await invoke("set_zoom", { zoom });
+}
+
 export async function ptyResize(id: number, rows: number, cols: number): Promise<void> {
   await invoke("pty_resize", { id, rows, cols });
 }
@@ -196,6 +200,8 @@ export interface Activity {
   updatedAt: string;
   actor: string | null;
   body: string | null;
+  /** Database id of the comment or review it points at, to scroll the PR to it. */
+  commentId: number | null;
 }
 
 export interface Inbox {

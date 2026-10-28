@@ -11,9 +11,24 @@ function cap(text: string): string {
   return text.length > MAX_CONTEXT ? `${text.slice(0, MAX_CONTEXT)}\n\n[truncated]` : text;
 }
 
-/** The PR's diff as markdown, one fenced block per file. */
-export function diffContext(pr: PullRequest, body: string, files: PrFile[]): string {
+/** A comment already on the PR: `where` is `path:line` for code comments, null for the conversation. */
+export interface Said {
+  author: string;
+  where: string | null;
+  resolved: boolean;
+  text: string;
+}
+
+/** The PR's diff as markdown, one fenced block per file, after what reviewers already said about it. */
+export function diffContext(pr: PullRequest, body: string, files: PrFile[], said: Said[] = []): string {
   const parts = [`# ${pr.repo}#${pr.number}: ${pr.title}`, `Author: ${pr.author ?? "?"}`, "", "## Description", body];
+  if (said.length > 0) {
+    parts.push("", "## Already said by reviewers");
+    for (const s of said) {
+      const where = s.where === null ? "conversation" : s.where;
+      parts.push("", `**${s.author}** on ${where}${s.resolved ? " (resolved)" : ""}:`, s.text);
+    }
+  }
   parts.push("", "## Changed files");
   for (const f of files) {
     const rename = f.previousPath === null ? "" : ` (renamed from ${f.previousPath})`;
@@ -23,12 +38,34 @@ export function diffContext(pr: PullRequest, body: string, files: PrFile[]): str
   return cap(parts.join("\n"));
 }
 
-export const REVIEW_PROMPT =
-  "You are reviewing a GitHub pull request. Its description and full diff are in .prdesk/context.md; read it, and open any other file in this repository you need for context. Look for real bugs, risky changes, missing tests, duplicated logic and unclear intent; skip style nits. Answer ONLY with one JSON object, no prose around it, in this shape: " +
-  '{"summary": "3 to 5 sentences: what changes and why", "risks": ["..."], "lookFirst": [{"path": "file", "why": "..."}], ' +
+const NO_REPEAT =
+  'The section "Already said by reviewers" in .prdesk/context.md lists what other reviewers already raised, resolved or not: never repeat a point made there, in comments or in risks; only add what is new. ';
+
+const REVIEW_ANSWER =
+  "Answer ONLY with one JSON object, no prose around it, in this shape: " +
+  '{"summary"": "3 to 5 sentences: what changes and why", "risks": ["..."], "lookFirst": [{"path": "file", "why": "..."}], ' +
   '"comments": [{"path": "file", "line": 42, "body": "..."}]}. ' +
   "`line` is a line number on the NEW side of the diff (an added or unchanged line shown in the hunk). " +
   "At most 10 comments, each specific and actionable. Write summary, risks, why and comment bodies in Brazilian Portuguese.";
+
+export const REVIEW_PROMPT =
+  "You are reviewing a GitHub pull request. Its description and full diff are in .prdesk/context.md; read it, and open any other file in this repository you need for context. Look for real bugs, risky changes, missing tests, duplicated logic and unclear intent; skip style nits. " +
+  NO_REPEAT +
+  REVIEW_ANSWER;
+
+/**
+ * The review prompt for an agent: its own review command (a Claude Code slash command like `/review-fabio-1`) when
+ * set, told what to review and to answer in the app's shape instead of its usual report.
+ */
+export function reviewPrompt(command: string): string {
+  if (command.trim() === "") return REVIEW_PROMPT;
+  return (
+    `${command.trim()} the pull request checked out in this worktree; its description and full diff are in .prdesk/context.md. ` +
+    NO_REPEAT +
+    "Ignore the output format of the review instructions above and put each confirmed finding in `comments`, its body starting with the severity (Blocker, Major or Minor), and the verdict in `summary`. " +
+    REVIEW_ANSWER
+  );
+}
 
 export const DESCRIBE_PROMPT =
   "Write a pull request title and description for the changes in .prdesk/context.md (the task and the diff). Answer ONLY with one JSON object: " +

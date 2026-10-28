@@ -1,6 +1,6 @@
 import { Bot, Check, ChevronDown, ChevronRight, GitCommitHorizontal, MessageSquareReply, Sparkles } from "lucide-react";
 import type { KeyboardEvent, ReactElement } from "react";
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import { type Config, contextPrompt, threadPrompt } from "../lib/config";
 import { numberHunk } from "../lib/diff";
@@ -63,15 +63,22 @@ export function CommentView({
   note,
   prAuthor,
   me,
+  focused = false,
 }: {
   comment: Comment;
   note?: string;
   /** Marks the PR author's comments, like Reddit's OP badge. */
   prAuthor?: string | null;
   me?: string;
+  /** The comment a notification pointed at: scrolled into view and highlighted. */
+  focused?: boolean;
 }): ReactElement {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect((): void => {
+    if (focused) ref.current?.scrollIntoView({ block: "center" });
+  }, [focused]);
   return (
-    <div className="comment">
+    <div ref={ref} className={focused ? "comment is-focused" : "comment"}>
       <div className="comment-head">
         <Avatar comment={comment} />
         <b>{comment.author}</b>
@@ -225,6 +232,7 @@ function ThreadCard({
   canPush,
   agentBlocked,
   draftReply,
+  focusId,
   onResolve,
   onAgent,
   onChanged,
@@ -234,6 +242,8 @@ function ThreadCard({
   config: Config;
   thread: Thread;
   waiting: boolean;
+  /** Comment to scroll to; the thread holding it unfolds with every reply. */
+  focusId: string | null;
   /** The viewer can push to the PR branch, so a suggestion can be committed from here. */
   canPush: boolean;
   agentBlocked: boolean;
@@ -248,6 +258,13 @@ function ThreadCard({
   const [fullCode, setFullCode] = useState(false);
   const [replying, setReplying] = useState(false);
   const action = useAction();
+  const holdsFocus = thread.comments.some((c): boolean => c.id === focusId);
+  useEffect((): void => {
+    if (!holdsFocus) return;
+    setOpen(true);
+    setRepliesOpen(true);
+    setAllReplies(true);
+  }, [holdsFocus]);
   const [root, ...replies] = thread.comments;
   const last = thread.comments.at(-1);
   const hidden = allReplies ? 0 : Math.max(0, replies.length - VISIBLE_REPLIES);
@@ -311,7 +328,9 @@ function ThreadCard({
           </div>
 
           <div className="convo">
-            {root !== undefined && <CommentView comment={root} prAuthor={pr.author} me={me} />}
+            {root !== undefined && (
+              <CommentView comment={root} prAuthor={pr.author} me={me} focused={root.id === focusId} />
+            )}
             {replies.length > 0 && (
               <div className={repliesOpen ? "replies" : "replies is-folded"}>
                 <button
@@ -330,7 +349,7 @@ function ThreadCard({
                     )}
                     {shown.map(
                       (c): ReactElement => (
-                        <CommentView key={c.id} comment={c} prAuthor={pr.author} me={me} />
+                        <CommentView key={c.id} comment={c} prAuthor={pr.author} me={me} focused={c.id === focusId} />
                       ),
                     )}
                   </>
@@ -438,6 +457,7 @@ export function ThreadsTab({
   agentBlocked,
   draftReply,
   resolveError,
+  focusId,
   onResolve,
   onAgent,
   onChanged,
@@ -445,6 +465,8 @@ export function ThreadsTab({
   pr: PullRequest;
   config: Config;
   detail: PullDetail;
+  /** Comment a notification pointed at; its fold opens so it can be seen. */
+  focusId: string | null;
   me: string;
   agentBlocked: boolean;
   draftReply: ReplyDrafter;
@@ -463,6 +485,8 @@ export function ThreadsTab({
     .sort((a, b): number => Number(waiting.has(b.id)) - Number(waiting.has(a.id)));
   const bots = detail.threads.filter((t): boolean => !t.isResolved && isBotThread(t));
   const resolved = detail.threads.filter((t): boolean => t.isResolved);
+  const holds = (threads: Thread[]): boolean =>
+    threads.some((t): boolean => t.comments.some((c): boolean => c.id === focusId));
 
   const fixBots = (): void => {
     const context = bots.flatMap((t): string[] => [
@@ -491,6 +515,7 @@ export function ThreadsTab({
       canPush={canPush}
       agentBlocked={agentBlocked}
       draftReply={draftReply}
+      focusId={focusId}
       onResolve={(): void => onResolve(t)}
       onAgent={onAgent}
       onChanged={onChanged}
@@ -508,7 +533,7 @@ export function ThreadsTab({
         {open.length === 0 && <p className="notice">Nenhuma conversa de pessoas em aberto.</p>}
         {open.map(card)}
         {bots.length > 0 && (
-          <details className="fold">
+          <details className="fold" open={holds(bots) || undefined}>
             <summary>
               Comentários de bots <b>{bots.length}</b>
             </summary>
@@ -523,7 +548,7 @@ export function ThreadsTab({
           </details>
         )}
         {resolved.length > 0 && (
-          <details className="fold">
+          <details className="fold" open={holds(resolved) || undefined}>
             <summary>
               Resolvidas <b>{resolved.length}</b>
             </summary>

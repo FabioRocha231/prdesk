@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { agentCommand, agentFor, DEFAULT_CONFIG, shellQuote } from "./config";
+import { agentCommand, agentFor, clampZoom, DEFAULT_CONFIG, shellQuote } from "./config";
 
 describe("shellQuote", () => {
   it("keeps hostile comment text inert inside single quotes", () => {
@@ -11,14 +11,24 @@ describe("shellQuote", () => {
   });
 
   it("fills the agent template", () => {
-    expect(agentCommand({ id: "c", name: "C", command: "claude {prompt}", headless: "", repos: [] }, "go")).toBe(
-      "claude 'go'",
-    );
+    expect(
+      agentCommand(
+        { id: "c", name: "C", command: "claude {prompt}", headless: "", reviewCommand: "", repos: [] },
+        "go",
+      ),
+    ).toBe("claude 'go'");
   });
 });
 
 describe("agentFor", () => {
-  const agent = (id: string, repos: string[]) => ({ id, name: id, command: "", headless: "", repos });
+  const agent = (id: string, repos: string[]) => ({
+    id,
+    name: id,
+    command: "",
+    headless: "",
+    reviewCommand: "",
+    repos,
+  });
   const config = {
     ...DEFAULT_CONFIG,
     agents: [agent("work", []), agent("gg", ["gg"]), agent("gg-api", ["gg/api"])],
@@ -31,5 +41,13 @@ describe("agentFor", () => {
     expect(agentFor(config, "gg/web")?.id).toBe("gg");
     expect(agentFor(config, "acme/web")?.id).toBe("work");
     expect(agentFor(config, "acme/web", "gone")?.id).toBe("work");
+  });
+});
+
+describe("clampZoom", () => {
+  it("keeps the scale on 10% steps between the limits", () => {
+    expect(clampZoom(1.1 + 0.1)).toBe(1.2);
+    expect(clampZoom(0.5)).toBe(0.8);
+    expect(clampZoom(3)).toBe(2);
   });
 });

@@ -44,8 +44,9 @@ export function Terminal({
   // A ref, so a new callback identity does not tear down the terminal.
   const onQuietRef = useRef(onQuiet);
   onQuietRef.current = onQuiet;
-  const fit = useRef<FitAddon | null>(null);
   const term = useRef<XTerm | null>(null);
+  // Fits xterm to its box and tells the PTY, so the agent draws for the width xterm shows.
+  const sync = useRef((): void => {});
 
   useEffect((): (() => void) => {
     const el = host.current;
@@ -55,7 +56,15 @@ export function Terminal({
     xterm.loadAddon(fitAddon);
     xterm.open(el);
     term.current = xterm;
-    fit.current = fitAddon;
+    let sent = "";
+    sync.current = (): void => {
+      if (el.offsetParent === null) return;
+      fitAddon.fit();
+      const size = `${xterm.rows}x${xterm.cols}`;
+      if (size === sent) return;
+      sent = size;
+      void ptyResize(sessionId, xterm.rows, xterm.cols);
+    };
 
     let quietTimer: number | undefined;
     let quiet = false;
@@ -89,15 +98,17 @@ export function Terminal({
       heard();
     })();
 
+    // xterm sends a bare Enter for Shift+Enter; agents (Claude Code, Codex, OpenCode) take Ctrl+J as a new line.
+    xterm.attachCustomKeyEventHandler((e): boolean => {
+      if (e.key !== "Enter" || !e.shiftKey) return true;
+      if (e.type === "keydown") void ptyWrite(sessionId, "\n");
+      return false;
+    });
     const input = xterm.onData((data): void => {
       void ptyWrite(sessionId, data);
     });
 
-    const resize = new ResizeObserver((): void => {
-      if (el.offsetParent === null) return;
-      fitAddon.fit();
-      void ptyResize(sessionId, xterm.rows, xterm.cols);
-    });
+    const resize = new ResizeObserver((): void => sync.current());
     resize.observe(el);
 
     const scheme = window.matchMedia("(prefers-color-scheme: dark)");
@@ -119,7 +130,7 @@ export function Terminal({
 
   useEffect((): void => {
     if (!visible) return;
-    fit.current?.fit();
+    sync.current();
     term.current?.focus();
   }, [visible]);
 

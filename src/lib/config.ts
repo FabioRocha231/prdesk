@@ -9,6 +9,8 @@ export interface Agent {
   command: string;
   /** Non-interactive variant that prints its answer and exits (AI review, drafted replies). Empty disables it. */
   headless: string;
+  /** Review command for "Analisar", e.g. `/review-fabio-1`; empty uses the app's own review prompt. */
+  reviewCommand: string;
   /** Orgs (`acme`) or repos (`acme/api`) this agent is used for, e.g. one Claude account per client. */
   repos: string[];
 }
@@ -22,6 +24,15 @@ export interface Config {
   agents: Agent[];
   defaultAgentId: string;
   pollSeconds: number;
+  /** Interface scale, 1 is 100%; for big monitors. */
+  zoom: number;
+}
+
+export const MIN_ZOOM = 0.8;
+export const MAX_ZOOM = 2;
+
+export function clampZoom(zoom: number): number {
+  return Math.min(MAX_ZOOM, Math.max(MIN_ZOOM, Math.round(zoom * 10) / 10));
 }
 
 export const DEFAULT_CONFIG: Config = {
@@ -29,12 +40,20 @@ export const DEFAULT_CONFIG: Config = {
   scopes: [],
   workspaceDir: "",
   agents: [
-    { id: "claude", name: "Claude Code", command: "claude {prompt}", headless: "claude -p {prompt}", repos: [] },
+    {
+      id: "claude",
+      name: "Claude Code",
+      command: "claude {prompt}",
+      headless: "claude -p {prompt}",
+      reviewCommand: "",
+      repos: [],
+    },
     {
       id: "codex",
       name: "Codex",
       command: "codex {prompt}",
       headless: "codex exec --skip-git-repo-check -s read-only {prompt}",
+      reviewCommand: "",
       repos: [],
     },
     {
@@ -42,11 +61,13 @@ export const DEFAULT_CONFIG: Config = {
       name: "OpenCode",
       command: "opencode --prompt {prompt}",
       headless: "opencode run {prompt}",
+      reviewCommand: "",
       repos: [],
     },
   ],
   defaultAgentId: "claude",
   pollSeconds: 60,
+  zoom: 1,
 };
 
 const STORE_FILE = "settings.json";
@@ -65,11 +86,13 @@ function normalize(stored: Partial<Config> | undefined): Config {
     ...config,
     scopes: config.scopes.filter(isValidScope),
     pollSeconds: Math.max(MIN_POLL_SECONDS, config.pollSeconds),
+    zoom: clampZoom(config.zoom),
     // Agents saved before `headless` existed get the default for their id.
     agents: (config.agents.length > 0 ? config.agents : DEFAULT_CONFIG.agents).map(
       (a): Agent => ({
         ...a,
         headless: a.headless ?? DEFAULT_CONFIG.agents.find((d): boolean => d.id === a.id)?.headless ?? "",
+        reviewCommand: a.reviewCommand ?? "",
         repos: (a.repos ?? []).filter(isValidScope),
       }),
     ),

@@ -716,6 +716,15 @@ kbd,
   display: flex;
   align-items: center;
   gap: 8px;
+  /* It sits over the end of a long title, so it paints the row's own background to hide what runs under it. */
+  padding-left: 12px;
+  background: var(--void);
+}
+.pl-line:hover .pl-action {
+  background: var(--hover);
+}
+.pl-line:has(.pl-row[aria-current="true"]) .pl-action {
+  background: var(--sel);
 }
 
 /* Inside a PR the list narrows to a rail: icon, title, repo dot and number, age. */
@@ -2272,6 +2281,24 @@ button.chain-node:hover {
   padding: 12px 0;
 }
 
+/* The comment a notification pointed at: a tint that fades once it has been seen. */
+.comment.is-focused {
+  margin: 0 -10px;
+  padding: 12px 10px;
+  border-radius: var(--radius);
+  animation: comment-focus 2.4s ease-out both;
+}
+
+@keyframes comment-focus {
+  0%,
+  40% {
+    background: color-mix(in srgb, var(--cyan) 14%, transparent);
+  }
+  100% {
+    background: transparent;
+  }
+}
+
 .comment-head {
   display: flex;
   align-items: center;
@@ -2364,6 +2391,23 @@ button.chain-node:hover {
   border-radius: 6px;
   padding: 10px 12px;
   overflow-x: auto;
+}
+
+/* GitHub's "Loading" placeholder for diagrams its page script would draw; drawDiagrams draws them instead. */
+.markdown .js-render-enrichment-loader {
+  display: none;
+}
+
+.mermaid-diagram {
+  margin: 12px 0;
+  overflow-x: auto;
+}
+
+.mermaid-diagram > * {
+  display: block;
+  max-width: 100%;
+  height: auto;
+  margin: 0 auto;
 }
 
 .markdown :not(pre) > code {

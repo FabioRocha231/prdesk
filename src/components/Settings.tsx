@@ -1,7 +1,7 @@
 import type { FormEvent, ReactElement } from "react";
 import { useEffect, useState } from "react";
 
-import { type Agent, type Config, DEFAULT_CONFIG, isValidScope } from "../lib/config";
+import { type Agent, type Config, DEFAULT_CONFIG, isValidScope, MAX_ZOOM, MIN_ZOOM } from "../lib/config";
 import { refKey } from "../lib/deps";
 import { fetchPull } from "../lib/github";
 import {
@@ -14,6 +14,12 @@ import {
   type TokenSource,
   tokenStatus,
 } from "../lib/ipc";
+
+// Every 10% between the limits, the same steps ⌘+ and ⌘− take.
+const ZOOMS = Array.from(
+  { length: Math.round((MAX_ZOOM - MIN_ZOOM) * 10) + 1 },
+  (_, i): number => (MIN_ZOOM * 10 + i) / 10,
+);
 
 const TOKEN_LABEL: Record<TokenSource, string> = {
   keychain: "Usando o token salvo no keychain do sistema.",
@@ -295,6 +301,27 @@ export function Settings({
         </div>
 
         <div className="field">
+          <label htmlFor="zoom">Tamanho da interface</label>
+          <div className="field-body">
+            <select
+              id="zoom"
+              className="input"
+              value={draft.zoom}
+              onChange={(e): void => setDraft({ ...draft, zoom: Number(e.target.value) })}
+            >
+              {ZOOMS.map(
+                (z): ReactElement => (
+                  <option key={z} value={z}>
+                    {Math.round(z * 100)}%
+                  </option>
+                ),
+              )}
+            </select>
+            <p className="hint">Para monitores grandes. Também com ⌘+ e ⌘−, e ⌘0 volta a 100%.</p>
+          </div>
+        </div>
+
+        <div className="field">
           <span className="label">Agentes</span>
           <div className="field-body">
             {draft.agents.map(
@@ -335,6 +362,15 @@ export function Settings({
                     />
                   </label>
                   <label className="agent-cmd">
+                    <span>Comando de review</span>
+                    <input
+                      className="input"
+                      placeholder="/meu-review (vazio usa o review do app)"
+                      value={a.reviewCommand}
+                      onChange={(e): void => updateAgent(a.id, { reviewCommand: e.target.value })}
+                    />
+                  </label>
+                  <label className="agent-cmd">
                     <span>Usar em</span>
                     <input
                       className="input"
@@ -355,7 +391,7 @@ export function Settings({
                     ...draft,
                     agents: [
                       ...draft.agents,
-                      { id: newAgentId(), name: "", command: "{prompt}", headless: "", repos: [] },
+                      { id: newAgentId(), name: "", command: "{prompt}", headless: "", reviewCommand: "", repos: [] },
                     ],
                   })
                 }

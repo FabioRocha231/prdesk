@@ -305,6 +305,7 @@ function detail(id: string): Record<string, unknown> {
       nodes: [
         {
           id: "CL0",
+          databaseId: 701,
           author: { __typename: "User", login: "maria" },
           bodyHTML: "<p>Should the retry also cover the upload client? It talks to the same API.</p>",
           createdAt: ago(9),
@@ -347,7 +348,9 @@ function detail(id: string): Record<string, unknown> {
         seed?.body ?? "Retries once after refreshing the token.\n\n- Adds `refreshToken()`\n- Tests for the retry path",
       mergeStateStatus: seed?.mergeState ?? "CLEAN",
       bodyHTML:
-        "<p>Retries once after refreshing the token. Covers <code>request()</code> and the upload client.</p><ul><li>Adds <code>refreshToken()</code></li><li>Tests for the retry path</li></ul>",
+        "<p>Retries once after refreshing the token. Covers <code>request()</code> and the upload client.</p><ul><li>Adds <code>refreshToken()</code></li><li>Tests for the retry path</li></ul>" +
+        // GitHub's shape for a mermaid block: the source in a code block plus a loader its page script replaces.
+        '<section class="js-render-needs-enrichment render-needs-enrichment" data-type="mermaid"><div class="js-render-enrichment-target"><div class="highlight"><pre lang="mermaid">flowchart LR\n  A["Request"] --&gt; B{"401?"}\n  B -- yes --&gt; C["refreshToken()&lt;br/&gt;(sem condição)"] --&gt; D["Retry once"]\n  B -- no --&gt; E["Return"]</pre></div></div><span class="js-render-enrichment-loader">Loading</span></section>',
       additions: 128,
       deletions: 31,
       changedFiles: 6,
@@ -447,6 +450,7 @@ const ACTIVITY = [
     updatedAt: minutesAgo(2),
     actor: "carla",
     body: "## O que muda\n\nAvisa o cliente quando o ETA da entrega muda mais de 5 minutos.",
+    commentId: null,
   },
   {
     id: "n2",
@@ -457,6 +461,7 @@ const ACTIVITY = [
     updatedAt: minutesAgo(9),
     actor: "diego",
     body: "Can we keep the cart id in the payment intent metadata instead of local storage?",
+    commentId: null,
   },
   {
     id: "n3",
@@ -467,6 +472,7 @@ const ACTIVITY = [
     updatedAt: minutesAgo(40),
     actor: "bruno",
     body: "@you this conflicts with the retry budget, mind taking a look?",
+    commentId: 701,
   },
   {
     id: "n4",
@@ -477,6 +483,7 @@ const ACTIVITY = [
     updatedAt: minutesAgo(180),
     actor: null,
     body: null,
+    commentId: null,
   },
 ];
 
