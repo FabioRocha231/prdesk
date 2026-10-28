@@ -1,6 +1,6 @@
 [package]
 name = "prdesk"
-version = "0.2.1"
+version = "0.3.0"
 description = "Every open PR, sorted by whose turn it is"
 authors = ["prdesk contributors"]
 edition = "2024"
