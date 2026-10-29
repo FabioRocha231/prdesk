@@ -363,6 +363,9 @@ function ActionBar({
   const runs = detail === null ? [] : failedRunIds(detail.checks);
   const failing = detail?.checks.filter((c): boolean => c.state === "failure") ?? [];
   const waiting = detail?.threads.filter((t): boolean => waitsOnMe(t, me, mine) && !isBotThread(t)) ?? [];
+  // What the agent can settle on my PR: every open human thread, notes I left myself included. Only `waiting` makes
+  // it my turn, though: a thread where I answered and wait for the reviewer must not take over the next step.
+  const fixable = mine ? (detail?.threads.filter((t): boolean => !t.isResolved && !isBotThread(t)) ?? []) : waiting;
   const mergeReady = mine && pr.reviewDecision === "APPROVED" && !pr.isDraft && detail?.mergeable === "MERGEABLE";
   const mergeLabel = MERGE_LABEL[detail?.mergeMethod ?? ""] ?? detail?.mergeMethod ?? "";
   // Changes were requested, I pushed after them, and the reviewer has not been asked to look again.
@@ -396,7 +399,7 @@ function ActionBar({
   const autopilot = (): void => {
     void action.run("autopilot", async (): Promise<void> => {
       const parts = [`# Fix everything pending on ${pr.url}`, ""];
-      for (const t of waiting) {
+      for (const t of fixable) {
         parts.push(`## Review thread on ${t.path}${t.line === null ? "" : `:${t.line}`}`);
         for (const c of t.comments) parts.push(`**${c.author}:** ${htmlToText(c.bodyHTML)}`);
         parts.push("");
@@ -469,7 +472,7 @@ function ActionBar({
     },
     autopilot: {
       key: "autopilot",
-      label: `Resolver tudo com agente (${waiting.length + failing.length})`,
+      label: `Resolver tudo com agente (${fixable.length + failing.length})`,
       icon: <Bot size={15} strokeWidth={2} aria-hidden />,
       tone: "accent",
       run: autopilot,
@@ -525,7 +528,8 @@ function ActionBar({
     rereview: rereview && (detail?.reviewerIds.length ?? 0) > 0,
     stale,
   });
-  const primary = step === null ? null : actions[step];
+  // Nothing else to do on my PR but my own open notes: settling them is the next step.
+  const primary = step !== null ? actions[step] : mine && !closed && fixable.length > 0 ? actions.autopilot : null;
 
   // Everything else that applies goes into the menu, grouped by what it touches.
   const menu: MenuItem[] = [];
@@ -542,7 +546,7 @@ function ActionBar({
     });
   };
   if (!closed && detail !== null) {
-    if (mine && (waiting.length > 0 || failing.length > 0)) add("pr", actions.autopilot, !agentBlocked);
+    if (mine && (fixable.length > 0 || failing.length > 0)) add("pr", actions.autopilot, !agentBlocked);
     if (mine && feedback.length > 0)
       add(
         "pr",
