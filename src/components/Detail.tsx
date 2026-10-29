@@ -118,34 +118,38 @@ const labelList = (text: string): string[] =>
     .map((l): string => l.trim())
     .filter(Boolean);
 
-function ConversationTab({
+/** The conversation of a PR or an issue: people first, bots folded, and a box to comment. */
+export function ConversationTab({
   config,
-  prId,
+  subjectId,
   prAuthor,
   me,
-  detail,
+  timeline,
   focusId,
+  placeholder = "Comentar na PR… (⌘↵ envia)",
   onChanged,
 }: {
   config: Config;
-  prId: string;
+  /** Node id of the PR or issue the comment goes to. */
+  subjectId: string;
   focusId: string | null;
   prAuthor: string | null;
   me: string;
-  detail: PullDetail;
+  timeline: PullDetail["timeline"];
+  placeholder?: string;
   onChanged: () => void;
 }): ReactElement {
   const [body, setBody] = useState("");
   const action = useAction();
   const send = async (): Promise<void> => {
-    if (await action.run("comment", async (): Promise<void> => await addComment(config, prId, body.trim()))) {
+    if (await action.run("comment", async (): Promise<void> => await addComment(config, subjectId, body.trim()))) {
       setBody("");
       onChanged();
     }
   };
-  const people = detail.timeline.filter((c): boolean => !c.isBot);
-  const bots = detail.timeline.filter((c): boolean => c.isBot);
-  const view = (c: (typeof detail.timeline)[number]): ReactElement => (
+  const people = timeline.filter((c): boolean => !c.isBot);
+  const bots = timeline.filter((c): boolean => c.isBot);
+  const view = (c: (typeof timeline)[number]): ReactElement => (
     <CommentView
       key={c.id}
       comment={c}
@@ -172,7 +176,7 @@ function ConversationTab({
           className="input"
           rows={3}
           maxLength={MAX_COMMENT}
-          placeholder="Comentar na PR… (⌘↵ envia)"
+          placeholder={placeholder}
           value={body}
           onChange={(e): void => setBody(e.target.value)}
           onKeyDown={(e): void => {
@@ -1189,10 +1193,10 @@ export function Detail({
             <DescriptionTab config={config} item={item} detail={detail} me={me} ai={ai} onChanged={onChanged} />
             <ConversationTab
               config={config}
-              prId={pr.id}
+              subjectId={pr.id}
               prAuthor={pr.author}
               me={me}
-              detail={detail}
+              timeline={detail.timeline}
               focusId={focusId}
               onChanged={onChanged}
             />

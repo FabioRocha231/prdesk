@@ -3909,6 +3909,13 @@ textarea.input {
 }
 
 .daily-body,
+/* Reading an issue needs the room of a PR's conversation, not a palette's. */
+.palette.issue-view {
+  width: min(860px, calc(100vw - 48px));
+  max-height: 80vh;
+  margin-top: 8vh;
+}
+
 .newtask-body {
   display: grid;
   gap: 12px;

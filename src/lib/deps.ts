@@ -33,6 +33,12 @@ export function pullLink(href: string): PrRef | null {
   return m === null ? null : { repo: m[1] ?? "", number: Number(m[2]) };
 }
 
+/** The issue (or PR: GitHub redirects) a /issues/ link points at, or null for anything else. */
+export function issueLink(href: string): PrRef | null {
+  const m = /^https?:\/\/[^\s/]+\/([\w.-]+\/[\w.-]+)\/issues\/(\d+)(?:[/?#]|$)/.exec(href);
+  return m === null ? null : { repo: m[1] ?? "", number: Number(m[2]) };
+}
+
 export function refKey(ref: PrRef): string {
   return `${ref.repo.toLowerCase()}#${ref.number}`;
 }

@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chains, dependencyIndex, isBlocked, parseDependencies, pullLink } from "./deps";
+import { chains, dependencyIndex, isBlocked, issueLink, parseDependencies, pullLink } from "./deps";
 import type { PullRequest } from "./model";
 
 describe("parseDependencies", () => {
@@ -87,5 +87,15 @@ describe("pullLink", () => {
     expect(pullLink("https://github.com/ggCheckout/saas-checkout/issues/12")).toBeNull();
     expect(pullLink("https://github.com/ggCheckout/saas-checkout/commit/abc123")).toBeNull();
     expect(pullLink("https://github.com/ggCheckout/saas-checkout/pull/12x")).toBeNull();
+  });
+});
+
+describe("issueLink", () => {
+  it("finds the issue behind a link and ignores PR links", () => {
+    expect(issueLink("https://github.com/ggCheckout/gg-admin/issues/12#issuecomment-9")).toEqual({
+      repo: "ggCheckout/gg-admin",
+      number: 12,
+    });
+    expect(issueLink("https://github.com/ggCheckout/gg-admin/pull/12")).toBeNull();
   });
 });

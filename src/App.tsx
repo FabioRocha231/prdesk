@@ -31,8 +31,8 @@ import { Detail, type DetailState, type PrAi, type SnoozeChoice } from "./compon
 import { Feed } from "./components/Feed";
 import { TreeView } from "./components/GitTree";
 import { HelpDialog } from "./components/Help";
-import { OpenPull } from "./components/Html";
-import { IssuesDialog } from "./components/Issues";
+import { OpenInApp } from "./components/Html";
+import { IssueDialog, IssuesDialog } from "./components/Issues";
 import { MissionsView, NewMissionDialog, type PartStatus } from "./components/Mission";
 import { Palette } from "./components/Palette";
 import { PrList } from "./components/PrList";
@@ -249,6 +249,8 @@ export function App(): ReactElement {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(false);
+  // The issue being read, from the issues list or a link.
+  const [issueRef, setIssueRef] = useState<PrRef | null>(null);
   const radarAt = useRef(0);
   const [dailyOpen, setDailyOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
@@ -1208,6 +1210,7 @@ export function App(): ReactElement {
 
   const startIssue = (issue: Issue): void => {
     setIssuesOpen(false);
+    setIssueRef(null);
     setTaskSeed({
       repo: issue.repo,
       text: `Resolve ${issue.repo}#${issue.number}: ${issue.title}\n\n${issue.body}`.slice(0, MAX_TASK_TEXT).trim(),
@@ -1280,6 +1283,7 @@ export function App(): ReactElement {
       dailyOpen ||
       helpOpen ||
       issuesOpen ||
+      issueRef !== null ||
       newMissionOpen ||
       stray !== null ||
       brokenBase !== null;
@@ -1487,7 +1491,7 @@ export function App(): ReactElement {
   };
 
   return (
-    <OpenPull.Provider value={(ref): void => void openRef(ref)}>
+    <OpenInApp.Provider value={{ pull: (ref): void => void openRef(ref), issue: setIssueRef }}>
       <div className="app">
         <aside className="side" aria-label="prdesk">
           <button
@@ -1718,8 +1722,27 @@ export function App(): ReactElement {
               issues={issues}
               error={issuesError}
               onStart={startIssue}
-              onOpenUrl={(url): void => void openUrl(url)}
+              onRead={(issue): void => {
+                setIssuesOpen(false);
+                setIssueRef({ repo: issue.repo, number: issue.number });
+              }}
               onClose={(): void => setIssuesOpen(false)}
+            />
+          )}
+
+          {issueRef !== null && config !== null && me !== null && (
+            <IssueDialog
+              key={`${issueRef.repo}#${issueRef.number}`}
+              config={config}
+              me={me}
+              issue={issueRef}
+              onStart={startIssue}
+              onNotIssue={(): void => {
+                setIssueRef(null);
+                void openRef(issueRef);
+              }}
+              onOpenUrl={(url): void => void openUrl(url)}
+              onClose={(): void => setIssueRef(null)}
             />
           )}
 
@@ -2037,6 +2060,6 @@ export function App(): ReactElement {
           </main>
         </div>
       </div>
-    </OpenPull.Provider>
+    </OpenInApp.Provider>
   );
 }
