@@ -1,14 +1,21 @@
 import { openUrl } from "@tauri-apps/plugin-opener";
 import DOMPurify from "dompurify";
 import type { MouseEvent, ReactElement } from "react";
-import { useEffect, useMemo, useRef } from "react";
+import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 
-/** Opens links in the system browser instead of navigating the app window. */
-async function openLink(event: MouseEvent<HTMLDivElement>): Promise<void> {
+import { type PrRef, pullLink } from "../lib/deps";
+
+/** Opens a PR inside the app; provided by App so links deep in a comment can reach it. */
+export const OpenPull = createContext<((ref: PrRef) => void) | null>(null);
+
+/** A PR link opens in the app (⌘-click keeps the browser); anything else goes to the system browser. */
+async function openLink(event: MouseEvent<HTMLDivElement>, openPull: ((ref: PrRef) => void) | null): Promise<void> {
   const anchor = (event.target as HTMLElement).closest("a");
   if (anchor === null) return;
   event.preventDefault();
-  if (anchor.href.startsWith("https://")) await openUrl(anchor.href);
+  const pull = pullLink(anchor.href);
+  if (pull !== null && openPull !== null && !event.metaKey && !event.ctrlKey) openPull(pull);
+  else if (anchor.href.startsWith("https://")) await openUrl(anchor.href);
 }
 
 let diagrams = 0;
@@ -48,6 +55,7 @@ async function drawDiagrams(root: HTMLElement, isLive: () => boolean): Promise<v
 export function Html({ html }: { html: string }): ReactElement {
   const clean = useMemo((): string => DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "input"] }), [html]);
   const ref = useRef<HTMLDivElement>(null);
+  const openPull = useContext(OpenPull);
   // biome-ignore lint/correctness/useExhaustiveDependencies: new HTML replaces the drawn diagrams, so they are drawn again
   useEffect((): (() => void) | undefined => {
     if (ref.current === null) return undefined;
@@ -63,7 +71,7 @@ export function Html({ html }: { html: string }): ReactElement {
       ref={ref}
       className="markdown"
       onClick={(e): void => {
-        void openLink(e);
+        void openLink(e, openPull);
       }}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized by DOMPurify above
       dangerouslySetInnerHTML={{ __html: clean }}

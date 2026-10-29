@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import { chains, dependencyIndex, isBlocked, parseDependencies } from "./deps";
+import { chains, dependencyIndex, isBlocked, parseDependencies, pullLink } from "./deps";
 import type { PullRequest } from "./model";
 
 describe("parseDependencies", () => {
@@ -72,5 +72,20 @@ describe("chains", () => {
     const a = pr("a", "g/a", 1, [{ repo: "g/b", number: 2 }]);
     const b = pr("b", "g/b", 2, [{ repo: "g/a", number: 1 }]);
     expect(chains([a, b], dependencyIndex([a, b]))[0]?.flat()).toHaveLength(2);
+  });
+});
+
+describe("pullLink", () => {
+  it("finds the PR behind a link to it, its files or one of its comments", () => {
+    const pr = { repo: "ggCheckout/saas-checkout", number: 1931 };
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/pull/1931")).toEqual(pr);
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/pull/1931/files")).toEqual(pr);
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/pull/1931#discussion_r1")).toEqual(pr);
+  });
+
+  it("ignores issues, commits and other pages", () => {
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/issues/12")).toBeNull();
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/commit/abc123")).toBeNull();
+    expect(pullLink("https://github.com/ggCheckout/saas-checkout/pull/12x")).toBeNull();
   });
 });
