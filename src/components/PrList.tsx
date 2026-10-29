@@ -25,8 +25,15 @@ import { needsReviewers, usualReviewers } from "../lib/reviewers";
 import { STALE_HOURS, workingHours } from "../lib/track";
 import { type AskReview, AskReviewButton } from "./Board";
 
-/** Icon and tone per kind. Tones colour only what is mine to do; whatever waits on others stays grey. */
-const KIND: Record<TurnKind, { icon: LucideIcon; tone: "talk" | "review" | "fix" | "merge" | "wait" }> = {
+/**
+ * Icon and tone per kind. What is mine to do colours its icon and verb; what waits on others keeps a grey verb and
+ * only says its state through the icon, the GitHub way: open or approved green, changes asked or a review pending
+ * amber, drafts and blocked ones grey.
+ */
+const KIND: Record<
+  TurnKind,
+  { icon: LucideIcon; tone: "talk" | "review" | "fix" | "merge" | "wait" | "wait-good" | "wait-warn" }
+> = {
   conflicts: { icon: TriangleAlert, tone: "fix" },
   thread: { icon: MessageSquare, tone: "talk" },
   changes: { icon: FileDiff, tone: "fix" },
@@ -37,15 +44,15 @@ const KIND: Record<TurnKind, { icon: LucideIcon; tone: "talk" | "review" | "fix"
   "blocked-approved": { icon: Link2, tone: "wait" },
   blocked: { icon: Link2, tone: "wait" },
   draft: { icon: CircleDashed, tone: "wait" },
-  "review-wait": { icon: Clock, tone: "wait" },
-  "rereview-wait": { icon: Clock, tone: "wait" },
+  "review-wait": { icon: Clock, tone: "wait-warn" },
+  "rereview-wait": { icon: Clock, tone: "wait-warn" },
   unrequested: { icon: UserPlus, tone: "wait" },
   reply: { icon: MessageSquare, tone: "talk" },
   "review-requested": { icon: Eye, tone: "review" },
   "review-again": { icon: Eye, tone: "review" },
-  approved: { icon: CircleCheck, tone: "wait" },
-  "changes-requested": { icon: FileDiff, tone: "wait" },
-  open: { icon: GitPullRequest, tone: "wait" },
+  approved: { icon: CircleCheck, tone: "wait-good" },
+  "changes-requested": { icon: FileDiff, tone: "wait-warn" },
+  open: { icon: GitPullRequest, tone: "wait-good" },
 };
 
 /** What a PR needs, as the list shows it: the kind's icon and verb, in its tone. */
