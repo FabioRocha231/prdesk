@@ -46,7 +46,7 @@ export interface PrFacts {
   myReview: Review | null;
   /** I approved and nothing was pushed since: approving again would only duplicate it. */
   myApprovalHolds: boolean;
-  /** Commits landed after my review: they want another look. */
+  /** Commits landed after my approval or change request: they want another look. Comments alone do not count. */
   pushedSinceMyReview: boolean;
   /** Review asked of me, directly or through one of my teams. */
   requestedOfMe: boolean;
@@ -91,7 +91,8 @@ export function prFacts(pr: PullRequest, me: string, blockedBy: string[] = []): 
     humanReviews.filter((r): boolean => sameLogin(r.author, me)),
     (r): string => r.submittedAt,
   );
-  const pushedSinceMyReview = myReview !== null && isAfter(pr.lastCommitAt, myReview.submittedAt);
+  const pushedSinceMyReview =
+    myReview !== null && myReview.state !== "COMMENTED" && isAfter(pr.lastCommitAt, myReview.submittedAt);
   const askAgain = humanReviews
     .filter(
       (r): boolean =>

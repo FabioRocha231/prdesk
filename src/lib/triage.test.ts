@@ -180,14 +180,17 @@ describe("triage of other people's PRs", () => {
     expect(t).toMatchObject({ column: "myTurn", actor: "caio" });
   });
 
-  it("is a review request when I am a requested reviewer or new commits landed after my review", () => {
+  it("is a review request when I am a requested reviewer or new commits landed after my verdict", () => {
     expect(triage(pr({ ...theirs, requestedReviewers: [ME] }), ME).column).toBe("reviewRequested");
-    const reviewed = pr({
-      ...theirs,
-      reviews: [{ author: ME, state: "COMMENTED", submittedAt: "2026-10-01T09:00:00Z" }],
-      lastCommitAt: "2026-10-02T09:00:00Z",
-    });
-    expect(triage(reviewed, ME).column).toBe("reviewRequested");
+    const reviewed = (state: string): PullRequest =>
+      pr({
+        ...theirs,
+        reviews: [{ author: ME, state, submittedAt: "2026-10-01T09:00:00Z" }],
+        lastCommitAt: "2026-10-02T09:00:00Z",
+      });
+    expect(triage(reviewed("APPROVED"), ME).column).toBe("reviewRequested");
+    // A reply in a thread is a COMMENTED review: every later push must not ask me to review again.
+    expect(triage(reviewed("COMMENTED"), ME).column).toBe("others");
   });
 
   it("is my turn when someone answers a thread I wrote in, even one I did not start", () => {
