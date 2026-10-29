@@ -126,6 +126,7 @@ pub fn run() {
             graph::git_fetch,
             workspace::pr_graph,
             github::rerun_failed_jobs,
+            github::ci_log,
             github::save_ci_log,
             github::github_notifications,
             github::github_rest,

@@ -197,6 +197,32 @@ pub async fn rerun_failed_jobs(
 // ponytail: keeps the last 400 lines of a job log, where the failure almost always is.
 const LOG_TAIL_LINES: usize = 400;
 
+async fn log_tail(
+    token: &str,
+    api_url: &str,
+    owner: &str,
+    repo: &str,
+    job_id: u64,
+) -> Result<String, String> {
+    let path = format!("/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
+    let log = rest(token, api_url, reqwest::Method::GET, &path, None).await?;
+    let lines: Vec<&str> = log.lines().collect();
+    Ok(lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n"))
+}
+
+/// A failed job's log tail, to read it in the app.
+#[tauri::command]
+pub async fn ci_log(
+    cache: State<'_, TokenCache>,
+    api_url: String,
+    owner: String,
+    repo: String,
+    job_id: u64,
+) -> Result<String, String> {
+    let token = auth::token(&cache)?;
+    log_tail(&token, &api_url, &owner, &repo, job_id).await
+}
+
 /// Downloads a failed job's log tail into the workspace and returns the file path for the agent to read.
 #[tauri::command]
 pub async fn save_ci_log(
@@ -208,10 +234,7 @@ pub async fn save_ci_log(
     workspace_dir: String,
 ) -> Result<String, String> {
     let token = auth::token(&cache)?;
-    let path = format!("/repos/{owner}/{repo}/actions/jobs/{job_id}/logs");
-    let log = rest(&token, &api_url, reqwest::Method::GET, &path, None).await?;
-    let lines: Vec<&str> = log.lines().collect();
-    let tail = lines[lines.len().saturating_sub(LOG_TAIL_LINES)..].join("\n");
+    let tail = log_tail(&token, &api_url, &owner, &repo, job_id).await?;
 
     let dir = crate::workspace::workspace_root(&workspace_dir)?.join(".ci-logs");
     std::fs::create_dir_all(&dir)
