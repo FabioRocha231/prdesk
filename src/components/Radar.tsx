@@ -4,7 +4,9 @@ import { useEffect, useRef, useState } from "react";
 
 import type { Config } from "../lib/config";
 import { age } from "../lib/format";
-import { createPull, type Radar, type StrayBranch } from "../lib/github";
+import { type BrokenBase, createPull, fetchBranchChecks, type Radar, type StrayBranch } from "../lib/github";
+import type { Check } from "../lib/model";
+import { ChecksTab } from "./Checks";
 import { useAction } from "./useAction";
 
 const MAX_TITLE = 256;
@@ -14,11 +16,11 @@ const MAX_BODY = 65_000;
 export function RadarStrip({
   radar,
   onOpenBranch,
-  onOpenUrl,
+  onOpenBase,
 }: {
   radar: Radar;
   onOpenBranch: (branch: StrayBranch) => void;
-  onOpenUrl: (url: string) => void;
+  onOpenBase: (base: BrokenBase) => void;
 }): ReactElement {
   return (
     <nav className="tasks-strip" aria-label="Fora das PRs">
@@ -30,7 +32,7 @@ export function RadarStrip({
             type="button"
             className="task-chip is-bad"
             title="O último commit da branch principal falha no CI: as PRs que partem dela podem falhar por isso"
-            onClick={(): void => onOpenUrl(b.url)}
+            onClick={(): void => onOpenBase(b)}
           >
             <OctagonAlert size={14} strokeWidth={2} aria-hidden />
             <span className="task-repo">{b.repo}</span>
@@ -152,6 +154,80 @@ export function BranchPrDialog({
           )}
         </div>
       </form>
+    </dialog>
+  );
+}
+
+/** Why a default branch is red: its checks and their logs, without leaving the app. */
+export function BaseChecksDialog({
+  config,
+  base,
+  onClose,
+}: {
+  config: Config;
+  base: BrokenBase;
+  onClose: () => void;
+}): ReactElement {
+  const dialog = useRef<HTMLDialogElement>(null);
+  const [checks, setChecks] = useState<Check[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [loads, setLoads] = useState(0);
+
+  useEffect((): void => {
+    dialog.current?.showModal();
+  }, []);
+
+  // biome-ignore lint/correctness/useExhaustiveDependencies: `loads` is the refetch trigger after a re-run
+  useEffect((): (() => void) => {
+    let live = true;
+    fetchBranchChecks(config, base.repo, base.branch).then(
+      (c): void => {
+        if (live) setChecks(c);
+      },
+      (e: unknown): void => {
+        if (live) setError(e instanceof Error ? e.message : String(e));
+      },
+    );
+    return (): void => {
+      live = false;
+    };
+  }, [config, base, loads]);
+
+  return (
+    // biome-ignore lint/a11y/useKeyWithClickEvents: backdrop click is a mouse shortcut; Esc closes the dialog natively
+    <dialog
+      ref={dialog}
+      className="palette newtask"
+      aria-label="CI da branch principal"
+      onClose={onClose}
+      onClick={(e): void => {
+        if (e.target === dialog.current) dialog.current.close();
+      }}
+    >
+      <div className="palette-input">
+        <OctagonAlert size={18} strokeWidth={2} aria-hidden />
+        <span className="feed-heading">
+          CI falhando · {base.repo} · {base.branch}
+        </span>
+        <kbd>Esc</kbd>
+      </div>
+      <div className="newtask-body">
+        {error !== null ? (
+          <p className="action-error" role="alert">
+            {error}
+          </p>
+        ) : checks === null ? (
+          <p className="notice">Carregando os checks…</p>
+        ) : (
+          <ChecksTab
+            config={config}
+            repo={base.repo}
+            checks={checks}
+            agent={null}
+            onChanged={(): void => setLoads((n): number => n + 1)}
+          />
+        )}
+      </div>
     </dialog>
   );
 }

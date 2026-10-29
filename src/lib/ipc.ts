@@ -140,6 +140,11 @@ export async function rerunFailedJobs(apiUrl: string, owner: string, repo: strin
   await invoke("rerun_failed_jobs", { apiUrl, owner, repo, runId });
 }
 
+/** The failed job's log tail, to read in the app. */
+export async function ciLog(apiUrl: string, owner: string, repo: string, jobId: number): Promise<string> {
+  return await invoke<string>("ci_log", { apiUrl, owner, repo, jobId });
+}
+
 /** Saves the failed job's log tail inside the workspace and returns its path. */
 export async function saveCiLog(
   apiUrl: string,

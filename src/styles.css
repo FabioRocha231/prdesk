@@ -3048,6 +3048,20 @@ textarea.input {
 .check + .check {
   border-top: 1px solid var(--line);
 }
+.check-log {
+  grid-column: 1 / -1;
+  max-height: 420px;
+  margin: 4px 0 8px;
+  padding: 10px 12px;
+  overflow: auto;
+  font: 400 0.75rem / 1.5 var(--mono);
+  white-space: pre;
+  color: var(--text-2);
+  background: var(--void);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+}
+
 .check-failure {
   background: color-mix(in srgb, var(--tone-fix) 5%, var(--void));
 }

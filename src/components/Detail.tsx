@@ -1200,11 +1200,10 @@ export function Detail({
         )}
         {detail !== null && tab === "checks" && (
           <ChecksTab
-            pr={pr}
             config={config}
-            detail={detail}
-            agentBlocked={agentBlocked}
-            onAgent={onOpenAgent}
+            repo={pr.repo}
+            checks={detail.checks}
+            agent={{ pr, blocked: agentBlocked, onAgent: onOpenAgent }}
             onChanged={onChanged}
           />
         )}

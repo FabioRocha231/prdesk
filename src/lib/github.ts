@@ -47,6 +47,14 @@ const PR_FIELDS = `
 
 const VIEWER_QUERY = "query { viewer { login } }";
 
+const CHECK_CONTEXTS = `contexts(first: 50) {
+  nodes {
+    __typename
+    ... on CheckRun { name conclusion status databaseId detailsUrl checkSuite { workflowRun { databaseId } } }
+    ... on StatusContext { context state targetUrl }
+  }
+}`;
+
 const DETAIL_QUERY = `query($id: ID!) {
   node(id: $id) {
     ... on PullRequest {
@@ -60,16 +68,7 @@ const DETAIL_QUERY = `query($id: ID!) {
         nodes {
           commit {
             statusCheckRollup {
-              contexts(first: 50) {
-                nodes {
-                  __typename
-                  ... on CheckRun {
-                    name conclusion status databaseId detailsUrl
-                    checkSuite { workflowRun { databaseId } }
-                  }
-                  ... on StatusContext { context state targetUrl }
-                }
-              }
+              ${CHECK_CONTEXTS}
             }
           }
         }
@@ -505,6 +504,21 @@ function toCheck(raw: RawContext): Check {
     jobId: raw.databaseId,
     runId: raw.checkSuite?.workflowRun?.databaseId ?? null,
   };
+}
+
+const BRANCH_CHECKS_QUERY = `query($owner: String!, $name: String!, $ref: String!) {
+  repository(owner: $owner, name: $name) {
+    object(expression: $ref) { ... on Commit { statusCheckRollup { ${CHECK_CONTEXTS} } } }
+  }
+}`;
+
+/** The checks of a branch's latest commit, e.g. a default branch gone red. */
+export async function fetchBranchChecks(config: Config, repo: string, branch: string): Promise<Check[]> {
+  const [owner = "", name = ""] = repo.split("/");
+  const data: {
+    repository: { object: { statusCheckRollup?: { contexts: { nodes: RawContext[] } } | null } | null } | null;
+  } = await githubGraphql(config.apiUrl, BRANCH_CHECKS_QUERY, { owner, name, ref: branch });
+  return data.repository?.object?.statusCheckRollup?.contexts.nodes.map(toCheck) ?? [];
 }
 
 const GHOST = "ghost";

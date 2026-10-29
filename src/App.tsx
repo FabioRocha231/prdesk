@@ -35,7 +35,7 @@ import { IssuesDialog } from "./components/Issues";
 import { MissionsView, NewMissionDialog, type PartStatus } from "./components/Mission";
 import { Palette } from "./components/Palette";
 import { PrList } from "./components/PrList";
-import { BranchPrDialog, RadarStrip } from "./components/Radar";
+import { BaseChecksDialog, BranchPrDialog, RadarStrip } from "./components/Radar";
 import { RepoFilter } from "./components/RepoFilter";
 import type { AiState } from "./components/Review";
 import { Settings } from "./components/Settings";
@@ -81,6 +81,7 @@ import {
   pullsFromCache,
   type Radar,
   requestReviewers,
+  type BrokenBase,
   type StrayBranch,
 } from "./lib/github";
 import { holderGroups } from "./lib/holders";
@@ -243,6 +244,7 @@ export function App(): ReactElement {
   const [taskSeed, setTaskSeed] = useState<TaskSeed | null>(null);
   const [radar, setRadar] = useState<Radar>({ branches: [], broken: [] });
   const [stray, setStray] = useState<StrayBranch | null>(null);
+  const [brokenBase, setBrokenBase] = useState<BrokenBase | null>(null);
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(false);
@@ -1271,7 +1273,7 @@ export function App(): ReactElement {
       }
     }
     const dialogOpen =
-      paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen || issuesOpen || newMissionOpen || stray !== null;
+      paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen || issuesOpen || newMissionOpen || stray !== null || brokenBase !== null;
     if (e.metaKey || e.ctrlKey || e.altKey || dialogOpen) return;
     if (e.key === "Escape") {
       const mission = selectedId === null ? undefined : tasks[selectedId]?.mission;
@@ -1720,6 +1722,10 @@ export function App(): ReactElement {
           />
         )}
 
+        {brokenBase !== null && (
+          <BaseChecksDialog config={config} base={brokenBase} onClose={(): void => setBrokenBase(null)} />
+        )}
+
         {dailyOpen && (
           <DailyDialog config={config} waiting={groups.waiting} onClose={(): void => setDailyOpen(false)} />
         )}
@@ -1847,7 +1853,7 @@ export function App(): ReactElement {
                 </nav>
               )}
               {hasRadar && (
-                <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenUrl={(url): void => void openUrl(url)} />
+                <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenBase={setBrokenBase} />
               )}
             </div>
           )}
