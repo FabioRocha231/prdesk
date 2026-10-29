@@ -619,8 +619,12 @@ kbd,
 .tone-fix .pl-icon {
   color: var(--tone-fix);
 }
-.tone-merge .pl-icon {
+.tone-merge .pl-icon,
+.tone-wait-good .pl-icon {
   color: var(--tone-merge);
+}
+.tone-wait-warn .pl-icon {
+  color: var(--amber);
 }
 .pl-verb {
   overflow: hidden;
@@ -628,7 +632,9 @@ kbd,
   white-space: nowrap;
   font-weight: 500;
 }
-.tone-wait .pl-verb {
+.tone-wait .pl-verb,
+.tone-wait-good .pl-verb,
+.tone-wait-warn .pl-verb {
   color: var(--text-2);
 }
 .pl-title {
@@ -1832,6 +1838,12 @@ button.chain-node:hover {
 }
 .turn.tone-merge {
   color: var(--tone-merge);
+}
+.turn.tone-wait-good .pl-icon {
+  color: var(--tone-merge);
+}
+.turn.tone-wait-warn .pl-icon {
+  color: var(--amber);
 }
 .turn .pl-icon {
   color: currentColor;
