@@ -27,7 +27,7 @@ import { useEffect, useMemo, useState } from "react";
 import { type AiRunner, IMPROVE_PROMPT, stripFence } from "../lib/ai";
 import { type Agent, type Config, contextPrompt } from "../lib/config";
 import { type DepLink, type Deps, isBlocked, type PrRef, refKey, shortRef } from "../lib/deps";
-import { prFacts, sameLogin } from "../lib/facts";
+import { isAfter, prFacts, sameLogin } from "../lib/facts";
 import { age } from "../lib/format";
 import {
   addComment,
@@ -366,6 +366,17 @@ function ActionBar({
   // What the agent can settle on my PR: every open human thread, notes I left myself included. Only `waiting` makes
   // it my turn, though: a thread where I answered and wait for the reviewer must not take over the next step.
   const fixable = mine ? (detail?.threads.filter((t): boolean => !t.isResolved && !isBotThread(t)) ?? []) : waiting;
+  // Conversation comments and review bodies by others since my last push: what the PR's "comentou" points at.
+  const said = mine
+    ? (detail?.timeline.filter(
+        (c): boolean =>
+          !c.isBot &&
+          !sameLogin(c.author, me) &&
+          isAfter(c.createdAt, pr.lastCommitAt) &&
+          htmlToText(c.bodyHTML).trim() !== "",
+      ) ?? [])
+    : [];
+  const todo = fixable.length + said.length + failing.length;
   const mergeReady = mine && pr.reviewDecision === "APPROVED" && !pr.isDraft && detail?.mergeable === "MERGEABLE";
   const mergeLabel = MERGE_LABEL[detail?.mergeMethod ?? ""] ?? detail?.mergeMethod ?? "";
   // Changes were requested, I pushed after them, and the reviewer has not been asked to look again.
@@ -404,6 +415,7 @@ function ActionBar({
         for (const c of t.comments) parts.push(`**${c.author}:** ${htmlToText(c.bodyHTML)}`);
         parts.push("");
       }
+      for (const c of said) parts.push(`## Conversation comment by ${c.author}`, htmlToText(c.bodyHTML), "");
       for (const c of failing) {
         if (c.jobId === null) {
           parts.push(`## Failing check: ${c.name} (no log available)`, "");
@@ -414,7 +426,7 @@ function ActionBar({
       }
       onOpenAgent(
         contextPrompt(
-          `Address every open review thread and fix every failing CI check of pull request ${pr.url} in this worktree, then run the relevant tests. Summarize the change per thread so I can answer the reviewers. Do not push.`,
+          `Address every open review thread and conversation comment, and fix every failing CI check, of pull request ${pr.url} in this worktree, then run the relevant tests. Check each point against the code first and change nothing for the ones already done. Summarize the change per thread and comment so I can answer the reviewers. Do not push.`,
         ),
         parts.join("\n"),
       );
@@ -472,7 +484,7 @@ function ActionBar({
     },
     autopilot: {
       key: "autopilot",
-      label: `Resolver tudo com agente (${fixable.length + failing.length})`,
+      label: `Resolver tudo com agente (${todo})`,
       icon: <Bot size={15} strokeWidth={2} aria-hidden />,
       tone: "accent",
       run: autopilot,
@@ -517,7 +529,7 @@ function ActionBar({
     mine,
     closed,
     conflicting: detail?.mergeable === "CONFLICTING",
-    pending: waiting.length + failing.length,
+    pending: waiting.length + said.length + failing.length,
     mergeReady: mergeReady === true,
     draft: pr.isDraft,
     behind: detail?.mergeState === "BEHIND",
@@ -529,7 +541,7 @@ function ActionBar({
     stale,
   });
   // Nothing else to do on my PR but my own open notes: settling them is the next step.
-  const primary = step !== null ? actions[step] : mine && !closed && fixable.length > 0 ? actions.autopilot : null;
+  const primary = step !== null ? actions[step] : mine && !closed && todo > 0 ? actions.autopilot : null;
 
   // Everything else that applies goes into the menu, grouped by what it touches.
   const menu: MenuItem[] = [];
@@ -546,7 +558,7 @@ function ActionBar({
     });
   };
   if (!closed && detail !== null) {
-    if (mine && (fixable.length > 0 || failing.length > 0)) add("pr", actions.autopilot, !agentBlocked);
+    if (mine && todo > 0) add("pr", actions.autopilot, !agentBlocked);
     if (mine && feedback.length > 0)
       add(
         "pr",
