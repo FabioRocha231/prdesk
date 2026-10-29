@@ -933,8 +933,9 @@ export function Detail({
 }): ReactElement {
   const { pr, triage } = item;
   const prIsMine = pr.author === me;
-  // Reviewing someone else's PR starts on the diff; my own PR starts on the code comments about it.
-  const [tab, setTab] = useState<Tab>(prIsMine ? "threads" : "files");
+  // Reviewing someone else's PR starts on the diff; my own PR starts on the code comments about it, or on the
+  // conversation when what brought me here is a comment there.
+  const [tab, setTab] = useState<Tab>(triage.kind === "comment" ? "conversation" : prIsMine ? "threads" : "files");
   const [editingTitle, setEditingTitle] = useState(false);
   const agent = agents.find((a): boolean => a.id === agentId) ?? agents[0];
   // What I resolve or approve here shows at once; the refetch onChanged starts confirms it a few seconds later.
@@ -998,7 +999,12 @@ export function Detail({
       count: detail === null ? null : openThreads.length,
       ...(waitingIds.length > 0 ? { alert: `${waitingIds.length} esperando você` } : {}),
     },
-    { id: "conversation", label: "Conversa", count: detail?.timeline.length ?? null },
+    {
+      id: "conversation",
+      label: "Conversa",
+      count: detail?.timeline.length ?? null,
+      ...(triage.kind === "comment" ? { alert: "comentário novo" } : {}),
+    },
     {
       id: "checks",
       label: "CI",
