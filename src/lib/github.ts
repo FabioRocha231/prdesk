@@ -1051,6 +1051,72 @@ const ISSUES_QUERY = `query($q: String!) {
   }
 }`;
 
+/** An issue to read in the app: its description and conversation. */
+export interface IssueDetail extends Issue {
+  author: string;
+  closed: boolean;
+  bodyHTML: string;
+  createdAt: string;
+  timeline: PullDetail["timeline"];
+}
+
+const ISSUE_QUERY = `query($owner: String!, $name: String!, $number: Int!) {
+  repository(owner: $owner, name: $name) {
+    url
+    issueOrPullRequest(number: $number) {
+      __typename
+      ... on Issue {
+      id number title url body bodyHTML state createdAt updatedAt
+      author { login }
+      labels(first: 5) { nodes { name } }
+      comments(last: 100) { nodes { id databaseId author { __typename login avatarUrl } bodyHTML createdAt } }
+      }
+    }
+  }
+}`;
+
+/** The issue `number` in `repo`, or null when that number is a PR (GitHub numbers both in one sequence). */
+export async function fetchIssue(config: Config, repo: string, number: number): Promise<IssueDetail | null> {
+  const [owner = "", name = ""] = repo.split("/");
+  type Raw = {
+    __typename: "Issue";
+    id: string;
+    number: number;
+    title: string;
+    url: string;
+    body: string;
+    bodyHTML: string;
+    state: string;
+    createdAt: string;
+    updatedAt: string;
+    author: Login | null;
+    labels: { nodes: { name: string }[] };
+    comments: { nodes: RawComment[] };
+  };
+  const data: {
+    repository: { url: string; issueOrPullRequest: Raw | { __typename: "PullRequest" } | null } | null;
+  } = await githubGraphql(config.apiUrl, ISSUE_QUERY, { owner, name, number });
+  const issue = data.repository?.issueOrPullRequest ?? null;
+  if (data.repository === null || issue === null) throw new Error(`${repo}#${number} não existe.`);
+  if (issue.__typename !== "Issue") return null;
+  return {
+    id: issue.id,
+    repo,
+    repoUrl: data.repository.url,
+    number: issue.number,
+    title: issue.title,
+    url: issue.url,
+    body: issue.body,
+    bodyHTML: issue.bodyHTML,
+    updatedAt: issue.updatedAt,
+    createdAt: issue.createdAt,
+    labels: issue.labels.nodes.map((l): string => l.name),
+    author: issue.author?.login ?? GHOST,
+    closed: issue.state !== "OPEN",
+    timeline: issue.comments.nodes.map((c) => ({ ...toComment(c), reviewState: null })),
+  };
+}
+
 /** Open issues assigned to me, newest activity first. */
 export async function fetchIssues(config: Config): Promise<Issue[]> {
   type Raw = {

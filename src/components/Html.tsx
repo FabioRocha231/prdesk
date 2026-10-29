@@ -3,18 +3,26 @@ import DOMPurify from "dompurify";
 import type { MouseEvent, ReactElement } from "react";
 import { createContext, useContext, useEffect, useMemo, useRef } from "react";
 
-import { type PrRef, pullLink } from "../lib/deps";
+import { issueLink, type PrRef, pullLink } from "../lib/deps";
 
-/** Opens a PR inside the app; provided by App so links deep in a comment can reach it. */
-export const OpenPull = createContext<((ref: PrRef) => void) | null>(null);
+interface InApp {
+  pull: (ref: PrRef) => void;
+  issue: (ref: PrRef) => void;
+}
 
-/** A PR link opens in the app (⌘-click keeps the browser); anything else goes to the system browser. */
-async function openLink(event: MouseEvent<HTMLDivElement>, openPull: ((ref: PrRef) => void) | null): Promise<void> {
+/** Opens a PR or an issue inside the app; provided by App so links deep in a comment can reach it. */
+export const OpenInApp = createContext<InApp | null>(null);
+
+/** PR and issue links open in the app (⌘-click keeps the browser); anything else goes to the system browser. */
+async function openLink(event: MouseEvent<HTMLDivElement>, inApp: InApp | null): Promise<void> {
   const anchor = (event.target as HTMLElement).closest("a");
   if (anchor === null) return;
   event.preventDefault();
   const pull = pullLink(anchor.href);
-  if (pull !== null && openPull !== null && !event.metaKey && !event.ctrlKey) openPull(pull);
+  const issue = issueLink(anchor.href);
+  const browser = inApp === null || event.metaKey || event.ctrlKey;
+  if (!browser && pull !== null) inApp.pull(pull);
+  else if (!browser && issue !== null) inApp.issue(issue);
   else if (anchor.href.startsWith("https://")) await openUrl(anchor.href);
 }
 
@@ -55,7 +63,7 @@ async function drawDiagrams(root: HTMLElement, isLive: () => boolean): Promise<v
 export function Html({ html }: { html: string }): ReactElement {
   const clean = useMemo((): string => DOMPurify.sanitize(html, { FORBID_TAGS: ["style", "form", "input"] }), [html]);
   const ref = useRef<HTMLDivElement>(null);
-  const openPull = useContext(OpenPull);
+  const inApp = useContext(OpenInApp);
   // biome-ignore lint/correctness/useExhaustiveDependencies: new HTML replaces the drawn diagrams, so they are drawn again
   useEffect((): (() => void) | undefined => {
     if (ref.current === null) return undefined;
@@ -71,7 +79,7 @@ export function Html({ html }: { html: string }): ReactElement {
       ref={ref}
       className="markdown"
       onClick={(e): void => {
-        void openLink(e, openPull);
+        void openLink(e, inApp);
       }}
       // biome-ignore lint/security/noDangerouslySetInnerHtml: sanitized by DOMPurify above
       dangerouslySetInnerHTML={{ __html: clean }}
