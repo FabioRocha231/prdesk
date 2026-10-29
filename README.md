@@ -24,7 +24,7 @@ The UI is in Brazilian Portuguese for now (*Sua vez* = your turn).
 - **Fewer trips to GitHub.** Commit a reviewer's suggestion from its thread, re-request review once you pushed the changes, nudge reviewers when a PR sits for days, filter the board by org or repo, ask the people who usually review in a repo straight from a card in *Aguardando* (a draft is marked ready first), and edit labels and assignees or close a PR from *Mais*.
 - **Missions across repos.** Describe a change that spans several repos: prdesk prepares a worktree per repo, a headless agent writes `plan.md` with the contract between them, you review it, and one agent per repo starts in parallel. The plan is a plain file under `~/PRDesk/missions/`. See [the design](docs/design/missions.md).
 - **Housekeeping.** Settings finds worktrees of closed PRs and removes the ones with nothing unsaved in them.
-- **Updates itself.** When a new release is out, a button in the header downloads it, installs it and restarts prdesk. Updates are signed; the app refuses one that was not.
+- **Updates itself.** prdesk looks for a new release at launch, every few hours and when its window comes back into focus; when one is out, a button at the bottom of the sidebar downloads it, installs it and restarts prdesk. Ajustes shows the installed version, looks on demand and says why a check failed. Updates are signed; the app refuses one that was not.
 
 ### How "whose turn" is decided
 

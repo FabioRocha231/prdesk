@@ -14,6 +14,7 @@ import {
   type TokenSource,
   tokenStatus,
 } from "../lib/ipc";
+import { type UpdateCheck, UpdateStatus } from "./UpdateButton";
 
 // Every 10% between the limits, the same steps ⌘+ and ⌘− take.
 const ZOOMS = Array.from(
@@ -205,6 +206,7 @@ function WorktreeCleanup({
 }
 
 export function Settings({
+  updates,
   config,
   firstRun,
   onSave,
@@ -213,6 +215,7 @@ export function Settings({
   openRefs,
   busyPaths,
 }: {
+  updates: UpdateCheck;
   config: Config;
   firstRun: boolean;
   openRefs: ReadonlySet<string>;
@@ -319,6 +322,11 @@ export function Settings({
             </select>
             <p className="hint">Para monitores grandes. Também com ⌘+ e ⌘−, e ⌘0 volta a 100%.</p>
           </div>
+        </div>
+
+        <div className="field">
+          <span className="label">Versão</span>
+          <UpdateStatus updates={updates} />
         </div>
 
         <div className="field">

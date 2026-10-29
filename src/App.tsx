@@ -43,7 +43,7 @@ import { Settings } from "./components/Settings";
 import { branchFor, NewTaskDialog, type Task, type TaskSeed, TaskView } from "./components/Task";
 import { Terminal } from "./components/Terminal";
 import { htmlToText, type ReplyDrafter } from "./components/Threads";
-import { UpdateButton } from "./components/UpdateButton";
+import { UpdateButton, useUpdateCheck } from "./components/UpdateButton";
 import {
   DESCRIBE_PROMPT,
   diffContext,
@@ -249,6 +249,7 @@ export function App(): ReactElement {
   const [issues, setIssues] = useState<Issue[] | null>(null);
   const [issuesError, setIssuesError] = useState<string | null>(null);
   const [issuesOpen, setIssuesOpen] = useState(false);
+  const updates = useUpdateCheck();
   // The issue being read, from the issues list or a link.
   const [issueRef, setIssueRef] = useState<PrRef | null>(null);
   const radarAt = useRef(0);
@@ -1604,7 +1605,7 @@ export function App(): ReactElement {
             <RepoFilter orgs={repoOrgs} filter={shownRepos} counts={repoCounts} onChange={changeRepoFilter} />
           )}
           <div className="side-foot">
-            <UpdateButton />
+            <UpdateButton update={updates.update} />
             <button type="button" className="side-item" title="Como usar (?)" onClick={(): void => setHelpOpen(true)}>
               <CircleHelp size={16} strokeWidth={2} aria-hidden />
               <span className="side-label">Como usar</span>
@@ -1780,6 +1781,7 @@ export function App(): ReactElement {
           >
             {view === "settings" && (
               <Settings
+                updates={updates}
                 config={config}
                 firstRun={hasToken !== true}
                 onSave={saveSettings}
