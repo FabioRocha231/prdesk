@@ -31,6 +31,7 @@ import { Detail, type DetailState, type PrAi, type SnoozeChoice } from "./compon
 import { Feed } from "./components/Feed";
 import { TreeView } from "./components/GitTree";
 import { HelpDialog } from "./components/Help";
+import { OpenPull } from "./components/Html";
 import { IssuesDialog } from "./components/Issues";
 import { MissionsView, NewMissionDialog, type PartStatus } from "./components/Mission";
 import { Palette } from "./components/Palette";
@@ -69,6 +70,7 @@ import {
 import { chains as chainsOf, type Deps, dependencyIndex, type PrRef, refKey, shortRef } from "./lib/deps";
 import { clock } from "./lib/format";
 import {
+  type BrokenBase,
   createPull,
   fetchDetail,
   fetchIssues,
@@ -81,7 +83,6 @@ import {
   pullsFromCache,
   type Radar,
   requestReviewers,
-  type BrokenBase,
   type StrayBranch,
 } from "./lib/github";
 import { holderGroups } from "./lib/holders";
@@ -1273,7 +1274,15 @@ export function App(): ReactElement {
       }
     }
     const dialogOpen =
-      paletteOpen || feedOpen || newTaskOpen || dailyOpen || helpOpen || issuesOpen || newMissionOpen || stray !== null || brokenBase !== null;
+      paletteOpen ||
+      feedOpen ||
+      newTaskOpen ||
+      dailyOpen ||
+      helpOpen ||
+      issuesOpen ||
+      newMissionOpen ||
+      stray !== null ||
+      brokenBase !== null;
     if (e.metaKey || e.ctrlKey || e.altKey || dialogOpen) return;
     if (e.key === "Escape") {
       const mission = selectedId === null ? undefined : tasks[selectedId]?.mission;
@@ -1478,556 +1487,556 @@ export function App(): ReactElement {
   };
 
   return (
-    <div className="app">
-      <aside className="side" aria-label="prdesk">
-        <button
-          type="button"
-          className="wordmark"
-          title="Voltar às PRs"
-          onClick={(): void => {
-            setView("board");
-            navigate(null);
-          }}
-        >
-          prdesk
-        </button>
-        <nav className="side-nav" aria-label="Seções">
+    <OpenPull.Provider value={(ref): void => void openRef(ref)}>
+      <div className="app">
+        <aside className="side" aria-label="prdesk">
           <button
             type="button"
-            className="side-item"
-            aria-current={view === "board"}
+            className="wordmark"
+            title="Voltar às PRs"
             onClick={(): void => {
               setView("board");
               navigate(null);
             }}
           >
-            <GitPullRequest size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Pull requests</span>
-            {pulls !== null && <b>{visible.length}</b>}
+            prdesk
           </button>
-          <button
-            type="button"
-            className="side-item"
-            title="Novidades (N)"
-            onClick={openFeed}
-            aria-label={unread > 0 ? `Novidades, ${unread} não lidas` : "Novidades"}
-          >
-            <Bell size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Novidades</span>
-            {unread > 0 && <b className="is-new">{unread}</b>}
-          </button>
-          <button
-            type="button"
-            className="side-item"
-            disabled={hasToken !== true}
-            title="Issues atribuídas a você (I)"
-            onClick={(): void => setIssuesOpen(true)}
-          >
-            <CircleDot size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Issues</span>
-            {issues !== null && issues.length > 0 && <b>{issues.length}</b>}
-          </button>
-          {snoozedCount > 0 && (
+          <nav className="side-nav" aria-label="Seções">
             <button
               type="button"
               className="side-item"
-              aria-pressed={showSnoozed}
-              title={showSnoozed ? "Esconder as PRs adiadas" : "Mostrar as PRs adiadas na lista"}
-              onClick={(): void => setShowSnoozed(!showSnoozed)}
+              aria-current={view === "board"}
+              onClick={(): void => {
+                setView("board");
+                navigate(null);
+              }}
             >
-              <Clock size={16} strokeWidth={2} aria-hidden />
-              <span className="side-label">Adiadas</span>
-              <b>{snoozedCount}</b>
+              <GitPullRequest size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Pull requests</span>
+              {pulls !== null && <b>{visible.length}</b>}
             </button>
-          )}
-          {chains.length > 0 && (
             <button
               type="button"
               className="side-item"
-              aria-current={view === "chains"}
-              title="PRs ligadas por dependência, na ordem de merge"
-              onClick={(): void => setView(view === "chains" ? "board" : "chains")}
+              title="Novidades (N)"
+              onClick={openFeed}
+              aria-label={unread > 0 ? `Novidades, ${unread} não lidas` : "Novidades"}
             >
-              <Link2 size={16} strokeWidth={2} aria-hidden />
-              <span className="side-label">Encadeadas</span>
-              <b>{chains.length}</b>
+              <Bell size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Novidades</span>
+              {unread > 0 && <b className="is-new">{unread}</b>}
             </button>
-          )}
-          <button
-            type="button"
-            className="side-item"
-            aria-current={view === "tree"}
-            title="Árvore de branches de um repositório (T)"
-            onClick={(): void => setView(view === "tree" ? "board" : "tree")}
-          >
-            <GitGraph size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Árvore</span>
-          </button>
-          <button
-            type="button"
-            className="side-item"
-            aria-current={view === "missions"}
-            disabled={hasToken !== true}
-            title="Missões: uma mudança em vários repos, um agente por repo (M)"
-            onClick={(): void => setView(view === "missions" ? "board" : "missions")}
-          >
-            <Workflow size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Missões</span>
-            {runningMissions > 0 && <b>{runningMissions}</b>}
-          </button>
-          <button
-            type="button"
-            className="side-item"
-            disabled={hasToken !== true}
-            title="Resumo para a daily"
-            onClick={(): void => setDailyOpen(true)}
-          >
-            <CalendarCheck size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Daily</span>
-          </button>
-        </nav>
-        {chipRepos.length > 1 && (
-          <RepoFilter orgs={repoOrgs} filter={shownRepos} counts={repoCounts} onChange={changeRepoFilter} />
-        )}
-        <div className="side-foot">
-          <UpdateButton />
-          <button type="button" className="side-item" title="Como usar (?)" onClick={(): void => setHelpOpen(true)}>
-            <CircleHelp size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Como usar</span>
-          </button>
-          <button
-            type="button"
-            className="side-item"
-            title={me === null ? "Ajustes (,)" : `Ajustes (,) · conectado como @${me}`}
-            aria-current={view === "settings"}
-            onClick={(): void => setView("settings")}
-          >
-            <SettingsIcon size={16} strokeWidth={2} aria-hidden />
-            <span className="side-label">Ajustes</span>
-          </button>
-        </div>
-      </aside>
-
-      <div className="shell">
-        <header className="bar">
-          <h1 className="bar-title">{VIEW_TITLE[view]}</h1>
-          <button
-            type="button"
-            className={sync.error === null ? "bar-sync" : "bar-sync is-error"}
-            onClick={(): void => void refresh()}
-            disabled={sync.loading || hasToken !== true}
-            title={`${syncText}. Atualizar agora (R)`}
-            aria-live="polite"
-          >
-            <RefreshCw className={sync.loading ? "spin" : ""} size={13} strokeWidth={2} aria-hidden />
-            <span className="bar-sync-text">{syncText}</span>
-          </button>
-          <span className="bar-gap" />
-          {view === "board" && !inDetail && (
-            <fieldset className="bar-seg" aria-label="Como mostrar as PRs (B)">
-              <button
-                type="button"
-                aria-pressed={boardView === "list"}
-                title="Lista, agrupada por quem está com a PR (B)"
-                onClick={(): void => {
-                  if (boardView !== "list") toggleBoardView();
-                }}
-              >
-                <ListIcon size={15} strokeWidth={2} aria-hidden /> Lista
-              </button>
-              <button
-                type="button"
-                aria-pressed={boardView === "columns"}
-                title="Colunas por status (B)"
-                onClick={(): void => {
-                  if (boardView !== "columns") toggleBoardView();
-                }}
-              >
-                <Columns3 size={15} strokeWidth={2} aria-hidden /> Colunas
-              </button>
-            </fieldset>
-          )}
-          {view === "board" && !inDetail && boardView === "columns" && (
             <button
               type="button"
-              className="bar-button"
-              aria-pressed={detailed}
-              title="Mostrar nos cards a linha do tempo, quem revisa e o tamanho da PR (D)"
-              onClick={toggleDetailed}
+              className="side-item"
+              disabled={hasToken !== true}
+              title="Issues atribuídas a você (I)"
+              onClick={(): void => setIssuesOpen(true)}
             >
-              <ActivityIcon size={15} strokeWidth={2} aria-hidden /> Detalhes
+              <CircleDot size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Issues</span>
+              {issues !== null && issues.length > 0 && <b>{issues.length}</b>}
             </button>
+            {snoozedCount > 0 && (
+              <button
+                type="button"
+                className="side-item"
+                aria-pressed={showSnoozed}
+                title={showSnoozed ? "Esconder as PRs adiadas" : "Mostrar as PRs adiadas na lista"}
+                onClick={(): void => setShowSnoozed(!showSnoozed)}
+              >
+                <Clock size={16} strokeWidth={2} aria-hidden />
+                <span className="side-label">Adiadas</span>
+                <b>{snoozedCount}</b>
+              </button>
+            )}
+            {chains.length > 0 && (
+              <button
+                type="button"
+                className="side-item"
+                aria-current={view === "chains"}
+                title="PRs ligadas por dependência, na ordem de merge"
+                onClick={(): void => setView(view === "chains" ? "board" : "chains")}
+              >
+                <Link2 size={16} strokeWidth={2} aria-hidden />
+                <span className="side-label">Encadeadas</span>
+                <b>{chains.length}</b>
+              </button>
+            )}
+            <button
+              type="button"
+              className="side-item"
+              aria-current={view === "tree"}
+              title="Árvore de branches de um repositório (T)"
+              onClick={(): void => setView(view === "tree" ? "board" : "tree")}
+            >
+              <GitGraph size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Árvore</span>
+            </button>
+            <button
+              type="button"
+              className="side-item"
+              aria-current={view === "missions"}
+              disabled={hasToken !== true}
+              title="Missões: uma mudança em vários repos, um agente por repo (M)"
+              onClick={(): void => setView(view === "missions" ? "board" : "missions")}
+            >
+              <Workflow size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Missões</span>
+              {runningMissions > 0 && <b>{runningMissions}</b>}
+            </button>
+            <button
+              type="button"
+              className="side-item"
+              disabled={hasToken !== true}
+              title="Resumo para a daily"
+              onClick={(): void => setDailyOpen(true)}
+            >
+              <CalendarCheck size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Daily</span>
+            </button>
+          </nav>
+          {chipRepos.length > 1 && (
+            <RepoFilter orgs={repoOrgs} filter={shownRepos} counts={repoCounts} onChange={changeRepoFilter} />
           )}
-          <button
-            type="button"
-            className="bar-search"
-            title="Buscar PR (⌘K)"
-            onClick={(): void => setPaletteOpen(true)}
-          >
-            <SearchIcon size={14} strokeWidth={2} aria-hidden /> <span>Buscar PR</span> <kbd>⌘K</kbd>
-          </button>
-          <button
-            type="button"
-            className="bar-primary"
-            title="Nova PR com agente (P)"
-            disabled={hasToken !== true}
-            onClick={(): void => setNewTaskOpen(true)}
-          >
-            <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> Nova PR
-          </button>
-        </header>
+          <div className="side-foot">
+            <UpdateButton />
+            <button type="button" className="side-item" title="Como usar (?)" onClick={(): void => setHelpOpen(true)}>
+              <CircleHelp size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Como usar</span>
+            </button>
+            <button
+              type="button"
+              className="side-item"
+              title={me === null ? "Ajustes (,)" : `Ajustes (,) · conectado como @${me}`}
+              aria-current={view === "settings"}
+              onClick={(): void => setView("settings")}
+            >
+              <SettingsIcon size={16} strokeWidth={2} aria-hidden />
+              <span className="side-label">Ajustes</span>
+            </button>
+          </div>
+        </aside>
 
-        {helpOpen && <HelpDialog onClose={(): void => setHelpOpen(false)} />}
+        <div className="shell">
+          <header className="bar">
+            <h1 className="bar-title">{VIEW_TITLE[view]}</h1>
+            <button
+              type="button"
+              className={sync.error === null ? "bar-sync" : "bar-sync is-error"}
+              onClick={(): void => void refresh()}
+              disabled={sync.loading || hasToken !== true}
+              title={`${syncText}. Atualizar agora (R)`}
+              aria-live="polite"
+            >
+              <RefreshCw className={sync.loading ? "spin" : ""} size={13} strokeWidth={2} aria-hidden />
+              <span className="bar-sync-text">{syncText}</span>
+            </button>
+            <span className="bar-gap" />
+            {view === "board" && !inDetail && (
+              <fieldset className="bar-seg" aria-label="Como mostrar as PRs (B)">
+                <button
+                  type="button"
+                  aria-pressed={boardView === "list"}
+                  title="Lista, agrupada por quem está com a PR (B)"
+                  onClick={(): void => {
+                    if (boardView !== "list") toggleBoardView();
+                  }}
+                >
+                  <ListIcon size={15} strokeWidth={2} aria-hidden /> Lista
+                </button>
+                <button
+                  type="button"
+                  aria-pressed={boardView === "columns"}
+                  title="Colunas por status (B)"
+                  onClick={(): void => {
+                    if (boardView !== "columns") toggleBoardView();
+                  }}
+                >
+                  <Columns3 size={15} strokeWidth={2} aria-hidden /> Colunas
+                </button>
+              </fieldset>
+            )}
+            {view === "board" && !inDetail && boardView === "columns" && (
+              <button
+                type="button"
+                className="bar-button"
+                aria-pressed={detailed}
+                title="Mostrar nos cards a linha do tempo, quem revisa e o tamanho da PR (D)"
+                onClick={toggleDetailed}
+              >
+                <ActivityIcon size={15} strokeWidth={2} aria-hidden /> Detalhes
+              </button>
+            )}
+            <button
+              type="button"
+              className="bar-search"
+              title="Buscar PR (⌘K)"
+              onClick={(): void => setPaletteOpen(true)}
+            >
+              <SearchIcon size={14} strokeWidth={2} aria-hidden /> <span>Buscar PR</span> <kbd>⌘K</kbd>
+            </button>
+            <button
+              type="button"
+              className="bar-primary"
+              title="Nova PR com agente (P)"
+              disabled={hasToken !== true}
+              onClick={(): void => setNewTaskOpen(true)}
+            >
+              <GitPullRequestCreate size={15} strokeWidth={2} aria-hidden /> Nova PR
+            </button>
+          </header>
 
-        {feedOpen && (
-          <Feed items={feed} seenAt={feedSeenAt} onPick={(a): void => void pickActivity(a)} onClose={closeFeed} />
-        )}
+          {helpOpen && <HelpDialog onClose={(): void => setHelpOpen(false)} />}
 
-        {newTaskOpen && (
-          <NewTaskDialog
-            repos={knownRepos}
-            seed={taskSeed}
-            onClose={(): void => {
-              setNewTaskOpen(false);
-              setTaskSeed(null);
-            }}
-            onCreate={(repo, branch, text, issue): void => void createTask(repo, branch, text, issue)}
-          />
-        )}
+          {feedOpen && (
+            <Feed items={feed} seenAt={feedSeenAt} onPick={(a): void => void pickActivity(a)} onClose={closeFeed} />
+          )}
 
-        {newMissionOpen && (
-          <NewMissionDialog
-            repos={knownRepos}
-            onClose={(): void => setNewMissionOpen(false)}
-            onCreate={(request, repos): void => void createMission(request, repos)}
-          />
-        )}
-
-        {issuesOpen && (
-          <IssuesDialog
-            issues={issues}
-            error={issuesError}
-            onStart={startIssue}
-            onOpenUrl={(url): void => void openUrl(url)}
-            onClose={(): void => setIssuesOpen(false)}
-          />
-        )}
-
-        {stray !== null && (
-          <BranchPrDialog
-            config={config}
-            branch={stray}
-            onCreated={(number): void => void branchOpened(stray, number)}
-            onClose={(): void => setStray(null)}
-          />
-        )}
-
-        {brokenBase !== null && (
-          <BaseChecksDialog config={config} base={brokenBase} onClose={(): void => setBrokenBase(null)} />
-        )}
-
-        {dailyOpen && (
-          <DailyDialog config={config} waiting={groups.waiting} onClose={(): void => setDailyOpen(false)} />
-        )}
-
-        {paletteOpen && (
-          <Palette
-            items={ordered}
-            onClose={(): void => setPaletteOpen(false)}
-            onPick={(id): void => {
-              setPaletteOpen(false);
-              navigate(id);
-            }}
-          />
-        )}
-
-        <main
-          className={mainClass}
-          {...(dockHeight === null ? {} : { style: { ["--dock" as string]: `${dockHeight}px` } })}
-        >
-          {view === "settings" && (
-            <Settings
-              config={config}
-              firstRun={hasToken !== true}
-              onSave={saveSettings}
-              onTokenChange={(): void => void checkToken()}
-              onClose={(): void => setView("board")}
-              openRefs={new Set((pulls ?? []).map((p): string => refKey(p)))}
-              busyPaths={
-                new Set(Object.values(sessions).flatMap((s): string[] => (s.status === "running" ? [s.cwd] : [])))
-              }
+          {newTaskOpen && (
+            <NewTaskDialog
+              repos={knownRepos}
+              seed={taskSeed}
+              onClose={(): void => {
+                setNewTaskOpen(false);
+                setTaskSeed(null);
+              }}
+              onCreate={(repo, branch, text, issue): void => void createTask(repo, branch, text, issue)}
             />
           )}
 
-          {view === "chains" && (
-            <Chains
-              chains={chains}
-              onSelect={(id): void => {
-                setView("board");
+          {newMissionOpen && (
+            <NewMissionDialog
+              repos={knownRepos}
+              onClose={(): void => setNewMissionOpen(false)}
+              onCreate={(request, repos): void => void createMission(request, repos)}
+            />
+          )}
+
+          {issuesOpen && (
+            <IssuesDialog
+              issues={issues}
+              error={issuesError}
+              onStart={startIssue}
+              onOpenUrl={(url): void => void openUrl(url)}
+              onClose={(): void => setIssuesOpen(false)}
+            />
+          )}
+
+          {stray !== null && (
+            <BranchPrDialog
+              config={config}
+              branch={stray}
+              onCreated={(number): void => void branchOpened(stray, number)}
+              onClose={(): void => setStray(null)}
+            />
+          )}
+
+          {brokenBase !== null && (
+            <BaseChecksDialog config={config} base={brokenBase} onClose={(): void => setBrokenBase(null)} />
+          )}
+
+          {dailyOpen && (
+            <DailyDialog config={config} waiting={groups.waiting} onClose={(): void => setDailyOpen(false)} />
+          )}
+
+          {paletteOpen && (
+            <Palette
+              items={ordered}
+              onClose={(): void => setPaletteOpen(false)}
+              onPick={(id): void => {
+                setPaletteOpen(false);
                 navigate(id);
               }}
             />
           )}
 
-          {view === "missions" && (
-            <MissionsView
-              missions={missions}
-              selectedId={openMissionId}
-              plans={missionPlans}
-              notes={partNotes}
-              checks={missionChecks}
-              partStatus={partStatus}
-              canPlan={(agentForRepo("")?.headless.trim() ?? "") !== ""}
-              onSelect={setOpenMissionId}
-              onNew={(): void => setNewMissionOpen(true)}
-              onSavePlan={writePlan}
-              onReloadPlan={(id): void => void readPlan(id)}
-              onReveal={(id): void => {
-                if (config === null) return;
-                void missionPlanPath(config.workspaceDir, id).then(revealItemInDir);
-              }}
-              onReplan={(id): void => void replanMission(id)}
-              onLaunch={(id): void => void launchMission(id)}
-              onPropagate={(id): void => void propagatePlan(id)}
-              onCheck={(id): void => void checkMission(id)}
-              onDeliver={(id): void => void deliverMission(id)}
-              onOpenPr={(repo, number): void => {
-                setView("board");
-                void openRef({ repo, number });
-              }}
-              onOpenPart={(taskId): void => {
-                setView("board");
-                navigate(taskId);
-              }}
-            />
-          )}
-
-          {view === "tree" && (
-            <TreeView pulls={pulls ?? []} onOpenPr={(repo, number): void => void openRef({ repo, number })} />
-          )}
-
-          {view === "board" && !inDetail && (hasTasks || hasRadar || runningMissions > 0) && (
-            <div className="strips">
-              {runningMissions > 0 && (
-                <nav className="tasks-strip" aria-label="Missões em andamento">
-                  <span className="tasks-label">Missões</span>
-                  {missions
-                    .filter((m): boolean => m.phase === "running")
-                    .map((m): ReactElement => {
-                      const waiting = m.parts.filter((p): boolean =>
-                        ["contract", "waiting", "error"].includes(partStatus(m, p)),
-                      ).length;
-                      return (
-                        <button
-                          key={m.id}
-                          type="button"
-                          className={waiting > 0 ? "task-chip is-bad" : "task-chip"}
-                          onClick={(): void => {
-                            setOpenMissionId(m.id);
-                            setView("missions");
-                          }}
-                        >
-                          <Workflow size={14} strokeWidth={2} aria-hidden />
-                          <span className="task-text">{m.title}</span>
-                          <span className="task-live">
-                            {waiting > 0 ? `${waiting} aguardando você` : `${m.parts.length} repos`}
-                          </span>
-                        </button>
-                      );
-                    })}
-                </nav>
-              )}
-              {hasTasks && (
-                <nav className="tasks-strip" aria-label="Tarefas em andamento">
-                  <span className="tasks-label">Em andamento</span>
-                  {looseTasks.map(
-                    (t): ReactElement => (
-                      <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
-                        <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
-                        <span className="task-repo">{t.repo}</span>
-                        <span className="task-text">{t.text}</span>
-                        {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
-                      </button>
-                    ),
-                  )}
-                </nav>
-              )}
-              {hasRadar && (
-                <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenBase={setBrokenBase} />
-              )}
-            </div>
-          )}
-
-          {view === "board" && !inDetail && boardView === "list" && (
-            <PrList
-              groups={groups}
-              loading={pulls === null}
-              selectedId={cursor}
-              onSelect={navigate}
-              onAskReview={askReview}
-            />
-          )}
-          {view === "board" && !inDetail && boardView === "columns" && (
-            <Board
-              groups={groups}
-              deps={deps}
-              loading={pulls === null}
-              selectedId={cursor}
-              agents={agentStates}
-              detailed={detailed}
-              me={me ?? ""}
-              onAskReview={askReview}
-              onSelect={navigate}
-            />
-          )}
-
-          {inDetail && selectedTask !== undefined && selected === null && (
-            <>
-              <aside className="rail-wrap">
-                <button
-                  type="button"
-                  className="back"
-                  onClick={(): void => {
-                    navigate(null);
-                    if (selectedTask.mission !== undefined) {
-                      setOpenMissionId(selectedTask.mission);
-                      setView("missions");
-                    }
-                  }}
-                >
-                  <ArrowLeft size={16} strokeWidth={2} aria-hidden />
-                  <span>{selectedTask.mission === undefined ? "Voltar às PRs" : "Voltar à missão"}</span>
-                  <kbd>Esc</kbd>
-                </button>
-                <PrList groups={groups} loading={false} selectedId={null} compact onSelect={navigate} />
-              </aside>
-              <TaskView
-                key={selectedTask.id}
-                task={selectedTask}
+          <main
+            className={mainClass}
+            {...(dockHeight === null ? {} : { style: { ["--dock" as string]: `${dockHeight}px` } })}
+          >
+            {view === "settings" && (
+              <Settings
                 config={config}
-                ai={
-                  selectedTask.cwd === null
-                    ? null
-                    : aiIn(selectedTask.repo, async (): Promise<string> => selectedTask.cwd ?? "")
+                firstRun={hasToken !== true}
+                onSave={saveSettings}
+                onTokenChange={(): void => void checkToken()}
+                onClose={(): void => setView("board")}
+                openRefs={new Set((pulls ?? []).map((p): string => refKey(p)))}
+                busyPaths={
+                  new Set(Object.values(sessions).flatMap((s): string[] => (s.status === "running" ? [s.cwd] : [])))
                 }
-                agentName={agentForRepo(selectedTask.repo)?.name ?? "agente"}
-                agentBusy={session?.status === "preparing" || session?.status === "running"}
-                onOpenAgent={reopen}
-                onCreated={(number): void => void taskOpened(selectedTask, number)}
               />
-            </>
-          )}
+            )}
 
-          {inDetail && selected !== null && (
-            <>
-              <aside className="rail-wrap">
-                <button type="button" className="back" onClick={(): void => navigate(null)}>
-                  <ArrowLeft size={16} strokeWidth={2} aria-hidden />
-                  <span>Voltar às PRs</span>
-                  <kbd>Esc</kbd>
-                </button>
-                <PrList groups={groups} loading={false} selectedId={selectedId} compact onSelect={navigate} />
-                <p className="rail-hint">
-                  <kbd>J</kbd> <kbd>K</kbd> para navegar
-                </p>
-              </aside>
-              <Detail
-                key={selected.pr.id}
-                item={selected}
-                focusComment={focus !== null && refKey(focus) === refKey(selected.pr) ? focus.commentId : null}
-                onFocused={clearFocus}
-                me={me ?? ""}
-                config={config}
-                state={details[selected.pr.id] ?? { status: "loading" }}
-                agents={config.agents}
-                agentId={agentForRepo(selected.pr.repo)?.id ?? ""}
-                agentBusy={session?.status === "preparing"}
-                agentBlocked={session?.status === "running" || session?.status === "preparing"}
-                worktree={session?.status === "running" || session?.status === "exited" ? session.cwd : null}
-                drafts={drafts[selected.pr.id] ?? NO_DRAFTS}
-                aiState={aiStates[selected.pr.id] ?? IDLE_AI}
-                ai={aiFor(selected.pr)}
-                draftReply={replyDrafter(selected)}
-                snoozed={isSnoozed(snoozes[selected.pr.id], selected.pr, now)}
-                deps={deps.get(selected.pr.id) ?? NO_DEPS}
-                repoPulls={(pulls ?? []).filter((p): boolean => p.repo === selected.pr.repo)}
-                onOpenRef={(ref): void => void openRef(ref)}
-                onAgentChange={(id): void => setAgentPicks((p) => ({ ...p, [selected.pr.repo]: id }))}
-                onOpenAgent={(prompt?: string, context?: string): void => void openAgent(selected, prompt, context)}
-                onOpenGithub={(): void => void openUrl(selected.pr.url)}
-                onDrafts={(next): void => setDrafts((d) => ({ ...d, [selected.pr.id]: next }))}
-                onAnalyze={(files): void => void analyze(selected, files)}
-                onSnooze={(choice): void => snooze(selected, choice)}
-                onChanged={(): void => {
-                  forceRefetch.current.add(selected.pr.id);
-                  void loadDetail(selected.pr.id);
-                  void refresh();
+            {view === "chains" && (
+              <Chains
+                chains={chains}
+                onSelect={(id): void => {
+                  setView("board");
+                  navigate(id);
                 }}
               />
-            </>
-          )}
+            )}
 
-          <section className="dock" hidden={!dockOpen} aria-label="Terminal do agente">
-            {/* biome-ignore lint/a11y/useSemanticElements: a focusable splitter is an ARIA separator; <hr> cannot take drag or keys */}
-            <div
-              className={dockDragging ? "dock-grip is-dragging" : "dock-grip"}
-              role="separator"
-              aria-orientation="horizontal"
-              aria-label="Redimensionar o terminal (setas para cima e para baixo)"
-              aria-valuenow={dockHeight ?? undefined}
-              tabIndex={0}
-              onPointerDown={resizeDock}
-              onKeyDown={nudgeDock}
-              onDoubleClick={(): void => {
-                setDockHeight(null);
-                void saveValue("dockHeight", null);
-              }}
-            />
-            {selectedId !== null && session !== undefined && (
-              <div className="term-bar">
-                <span className="term-title">
-                  <TerminalIcon className="term-icon" size={15} strokeWidth={2} aria-hidden />
-                  <b>{session.agentName}</b>
-                  {(session.status === "running" || session.status === "exited") && (
-                    <span className="term-cwd">{session.cwd}</span>
-                  )}
-                </span>
-                <span className="term-actions">
-                  {session.status === "exited" && (
-                    <button type="button" className="text-button" onClick={reopen}>
-                      Abrir de novo
-                    </button>
-                  )}
-                  {session.status !== "preparing" && (
-                    <button type="button" className="text-button" onClick={(): void => void closeSession(selectedId)}>
-                      <X size={15} strokeWidth={2} aria-hidden />
-                      {session.status === "running" ? "Encerrar" : "Fechar"}
-                    </button>
-                  )}
-                </span>
+            {view === "missions" && (
+              <MissionsView
+                missions={missions}
+                selectedId={openMissionId}
+                plans={missionPlans}
+                notes={partNotes}
+                checks={missionChecks}
+                partStatus={partStatus}
+                canPlan={(agentForRepo("")?.headless.trim() ?? "") !== ""}
+                onSelect={setOpenMissionId}
+                onNew={(): void => setNewMissionOpen(true)}
+                onSavePlan={writePlan}
+                onReloadPlan={(id): void => void readPlan(id)}
+                onReveal={(id): void => {
+                  if (config === null) return;
+                  void missionPlanPath(config.workspaceDir, id).then(revealItemInDir);
+                }}
+                onReplan={(id): void => void replanMission(id)}
+                onLaunch={(id): void => void launchMission(id)}
+                onPropagate={(id): void => void propagatePlan(id)}
+                onCheck={(id): void => void checkMission(id)}
+                onDeliver={(id): void => void deliverMission(id)}
+                onOpenPr={(repo, number): void => {
+                  setView("board");
+                  void openRef({ repo, number });
+                }}
+                onOpenPart={(taskId): void => {
+                  setView("board");
+                  navigate(taskId);
+                }}
+              />
+            )}
+
+            {view === "tree" && (
+              <TreeView pulls={pulls ?? []} onOpenPr={(repo, number): void => void openRef({ repo, number })} />
+            )}
+
+            {view === "board" && !inDetail && (hasTasks || hasRadar || runningMissions > 0) && (
+              <div className="strips">
+                {runningMissions > 0 && (
+                  <nav className="tasks-strip" aria-label="Missões em andamento">
+                    <span className="tasks-label">Missões</span>
+                    {missions
+                      .filter((m): boolean => m.phase === "running")
+                      .map((m): ReactElement => {
+                        const waiting = m.parts.filter((p): boolean =>
+                          ["contract", "waiting", "error"].includes(partStatus(m, p)),
+                        ).length;
+                        return (
+                          <button
+                            key={m.id}
+                            type="button"
+                            className={waiting > 0 ? "task-chip is-bad" : "task-chip"}
+                            onClick={(): void => {
+                              setOpenMissionId(m.id);
+                              setView("missions");
+                            }}
+                          >
+                            <Workflow size={14} strokeWidth={2} aria-hidden />
+                            <span className="task-text">{m.title}</span>
+                            <span className="task-live">
+                              {waiting > 0 ? `${waiting} aguardando você` : `${m.parts.length} repos`}
+                            </span>
+                          </button>
+                        );
+                      })}
+                  </nav>
+                )}
+                {hasTasks && (
+                  <nav className="tasks-strip" aria-label="Tarefas em andamento">
+                    <span className="tasks-label">Em andamento</span>
+                    {looseTasks.map(
+                      (t): ReactElement => (
+                        <button key={t.id} type="button" className="task-chip" onClick={(): void => navigate(t.id)}>
+                          <GitPullRequestCreate size={14} strokeWidth={2} aria-hidden />
+                          <span className="task-repo">{t.repo}</span>
+                          <span className="task-text">{t.text}</span>
+                          {sessions[t.id]?.status === "running" && <span className="task-live pulse">agente</span>}
+                        </button>
+                      ),
+                    )}
+                  </nav>
+                )}
+                {hasRadar && <RadarStrip radar={shownRadar} onOpenBranch={setStray} onOpenBase={setBrokenBase} />}
               </div>
             )}
-            {session?.status === "preparing" && (
-              <p className="term-state pulse">
-                Preparando o worktree. Na primeira vez o repo é clonado, e isso pode levar um tempo
-              </p>
+
+            {view === "board" && !inDetail && boardView === "list" && (
+              <PrList
+                groups={groups}
+                loading={pulls === null}
+                selectedId={cursor}
+                onSelect={navigate}
+                onAskReview={askReview}
+              />
             )}
-            {session?.status === "error" && <p className="term-state error">{session.message}</p>}
-            {session?.status === "exited" && <p className="term-state">A sessão terminou.</p>}
-            {Object.entries(sessions).map(([prId, s]): ReactElement | null =>
-              s.status === "running" ? (
-                <Terminal
-                  key={prId}
-                  sessionId={s.sessionId}
-                  visible={dockOpen && prId === selectedId}
-                  onExit={onSessionExit}
-                  onQuiet={onSessionQuiet}
+            {view === "board" && !inDetail && boardView === "columns" && (
+              <Board
+                groups={groups}
+                deps={deps}
+                loading={pulls === null}
+                selectedId={cursor}
+                agents={agentStates}
+                detailed={detailed}
+                me={me ?? ""}
+                onAskReview={askReview}
+                onSelect={navigate}
+              />
+            )}
+
+            {inDetail && selectedTask !== undefined && selected === null && (
+              <>
+                <aside className="rail-wrap">
+                  <button
+                    type="button"
+                    className="back"
+                    onClick={(): void => {
+                      navigate(null);
+                      if (selectedTask.mission !== undefined) {
+                        setOpenMissionId(selectedTask.mission);
+                        setView("missions");
+                      }
+                    }}
+                  >
+                    <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+                    <span>{selectedTask.mission === undefined ? "Voltar às PRs" : "Voltar à missão"}</span>
+                    <kbd>Esc</kbd>
+                  </button>
+                  <PrList groups={groups} loading={false} selectedId={null} compact onSelect={navigate} />
+                </aside>
+                <TaskView
+                  key={selectedTask.id}
+                  task={selectedTask}
+                  config={config}
+                  ai={
+                    selectedTask.cwd === null
+                      ? null
+                      : aiIn(selectedTask.repo, async (): Promise<string> => selectedTask.cwd ?? "")
+                  }
+                  agentName={agentForRepo(selectedTask.repo)?.name ?? "agente"}
+                  agentBusy={session?.status === "preparing" || session?.status === "running"}
+                  onOpenAgent={reopen}
+                  onCreated={(number): void => void taskOpened(selectedTask, number)}
                 />
-              ) : null,
+              </>
             )}
-          </section>
-        </main>
+
+            {inDetail && selected !== null && (
+              <>
+                <aside className="rail-wrap">
+                  <button type="button" className="back" onClick={(): void => navigate(null)}>
+                    <ArrowLeft size={16} strokeWidth={2} aria-hidden />
+                    <span>Voltar às PRs</span>
+                    <kbd>Esc</kbd>
+                  </button>
+                  <PrList groups={groups} loading={false} selectedId={selectedId} compact onSelect={navigate} />
+                  <p className="rail-hint">
+                    <kbd>J</kbd> <kbd>K</kbd> para navegar
+                  </p>
+                </aside>
+                <Detail
+                  key={selected.pr.id}
+                  item={selected}
+                  focusComment={focus !== null && refKey(focus) === refKey(selected.pr) ? focus.commentId : null}
+                  onFocused={clearFocus}
+                  me={me ?? ""}
+                  config={config}
+                  state={details[selected.pr.id] ?? { status: "loading" }}
+                  agents={config.agents}
+                  agentId={agentForRepo(selected.pr.repo)?.id ?? ""}
+                  agentBusy={session?.status === "preparing"}
+                  agentBlocked={session?.status === "running" || session?.status === "preparing"}
+                  worktree={session?.status === "running" || session?.status === "exited" ? session.cwd : null}
+                  drafts={drafts[selected.pr.id] ?? NO_DRAFTS}
+                  aiState={aiStates[selected.pr.id] ?? IDLE_AI}
+                  ai={aiFor(selected.pr)}
+                  draftReply={replyDrafter(selected)}
+                  snoozed={isSnoozed(snoozes[selected.pr.id], selected.pr, now)}
+                  deps={deps.get(selected.pr.id) ?? NO_DEPS}
+                  repoPulls={(pulls ?? []).filter((p): boolean => p.repo === selected.pr.repo)}
+                  onOpenRef={(ref): void => void openRef(ref)}
+                  onAgentChange={(id): void => setAgentPicks((p) => ({ ...p, [selected.pr.repo]: id }))}
+                  onOpenAgent={(prompt?: string, context?: string): void => void openAgent(selected, prompt, context)}
+                  onOpenGithub={(): void => void openUrl(selected.pr.url)}
+                  onDrafts={(next): void => setDrafts((d) => ({ ...d, [selected.pr.id]: next }))}
+                  onAnalyze={(files): void => void analyze(selected, files)}
+                  onSnooze={(choice): void => snooze(selected, choice)}
+                  onChanged={(): void => {
+                    forceRefetch.current.add(selected.pr.id);
+                    void loadDetail(selected.pr.id);
+                    void refresh();
+                  }}
+                />
+              </>
+            )}
+
+            <section className="dock" hidden={!dockOpen} aria-label="Terminal do agente">
+              {/* biome-ignore lint/a11y/useSemanticElements: a focusable splitter is an ARIA separator; <hr> cannot take drag or keys */}
+              <div
+                className={dockDragging ? "dock-grip is-dragging" : "dock-grip"}
+                role="separator"
+                aria-orientation="horizontal"
+                aria-label="Redimensionar o terminal (setas para cima e para baixo)"
+                aria-valuenow={dockHeight ?? undefined}
+                tabIndex={0}
+                onPointerDown={resizeDock}
+                onKeyDown={nudgeDock}
+                onDoubleClick={(): void => {
+                  setDockHeight(null);
+                  void saveValue("dockHeight", null);
+                }}
+              />
+              {selectedId !== null && session !== undefined && (
+                <div className="term-bar">
+                  <span className="term-title">
+                    <TerminalIcon className="term-icon" size={15} strokeWidth={2} aria-hidden />
+                    <b>{session.agentName}</b>
+                    {(session.status === "running" || session.status === "exited") && (
+                      <span className="term-cwd">{session.cwd}</span>
+                    )}
+                  </span>
+                  <span className="term-actions">
+                    {session.status === "exited" && (
+                      <button type="button" className="text-button" onClick={reopen}>
+                        Abrir de novo
+                      </button>
+                    )}
+                    {session.status !== "preparing" && (
+                      <button type="button" className="text-button" onClick={(): void => void closeSession(selectedId)}>
+                        <X size={15} strokeWidth={2} aria-hidden />
+                        {session.status === "running" ? "Encerrar" : "Fechar"}
+                      </button>
+                    )}
+                  </span>
+                </div>
+              )}
+              {session?.status === "preparing" && (
+                <p className="term-state pulse">
+                  Preparando o worktree. Na primeira vez o repo é clonado, e isso pode levar um tempo
+                </p>
+              )}
+              {session?.status === "error" && <p className="term-state error">{session.message}</p>}
+              {session?.status === "exited" && <p className="term-state">A sessão terminou.</p>}
+              {Object.entries(sessions).map(([prId, s]): ReactElement | null =>
+                s.status === "running" ? (
+                  <Terminal
+                    key={prId}
+                    sessionId={s.sessionId}
+                    visible={dockOpen && prId === selectedId}
+                    onExit={onSessionExit}
+                    onQuiet={onSessionQuiet}
+                  />
+                ) : null,
+              )}
+            </section>
+          </main>
+        </div>
       </div>
-    </div>
+    </OpenPull.Provider>
   );
 }

@@ -27,6 +27,12 @@ export function parseDependencies(body: string, repo: string): PrRef[] {
   return [...refs.values()];
 }
 
+/** The PR a link points at (its conversation, files or one comment), or null for anything else. */
+export function pullLink(href: string): PrRef | null {
+  const m = /^https?:\/\/[^\s/]+\/([\w.-]+\/[\w.-]+)\/pull\/(\d+)(?:[/?#]|$)/.exec(href);
+  return m === null ? null : { repo: m[1] ?? "", number: Number(m[2]) };
+}
+
 export function refKey(ref: PrRef): string {
   return `${ref.repo.toLowerCase()}#${ref.number}`;
 }
