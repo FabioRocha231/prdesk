@@ -34,6 +34,7 @@ const PR_FIELDS = `
       }
     }
     latestReviews(first: 20) { nodes { author { __typename login avatarUrl } state submittedAt } }
+    latestOpinionatedReviews(first: 20) { nodes { author { login } state submittedAt } }
     reviewThreads(first: 30) {
       nodes {
         isResolved
@@ -130,6 +131,11 @@ interface RawPull {
       submittedAt: string;
     }[];
   };
+  /**
+   * Each person's latest approval or change request. `latestReviews` keeps only the latest of any kind, and a reply
+   * in a thread is a COMMENTED review, so it would hide an approval. Absent in PRs cached before it was queried.
+   */
+  latestOpinionatedReviews?: { nodes: { author: Login | null; state: string; submittedAt: string }[] };
   reviewThreads: {
     nodes: {
       isResolved: boolean;
@@ -213,18 +219,19 @@ function toPull(raw: RawPull & { id: string }): PullRequest {
     viewerRequested: raw.viewerRequested === true,
     requestedAt,
     readyAt,
-    reviews: raw.latestReviews.nodes.flatMap((r) =>
-      r.author === null
-        ? []
-        : [
-            {
-              author: r.author.login,
-              state: r.state,
-              submittedAt: r.submittedAt,
-              ...(r.author.__typename === "Bot" ? { isBot: true } : {}),
-            },
-          ],
-    ),
+    reviews: raw.latestReviews.nodes.flatMap((r) => {
+      if (r.author === null) return [];
+      const login = r.author.login;
+      const verdict = raw.latestOpinionatedReviews?.nodes.find((o): boolean => o.author?.login === login) ?? r;
+      return [
+        {
+          author: login,
+          state: verdict.state,
+          submittedAt: verdict.submittedAt,
+          ...(r.author.__typename === "Bot" ? { isBot: true } : {}),
+        },
+      ];
+    }),
     threads: raw.reviewThreads.nodes.map(toThread),
     avatars: Object.fromEntries(
       [
