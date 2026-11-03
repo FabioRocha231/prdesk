@@ -48,6 +48,11 @@ export interface PrFacts {
   myApprovalHolds: boolean;
   /** Commits landed after my approval or change request: they want another look. Comments alone do not count. */
   pushedSinceMyReview: boolean;
+  /**
+   * The push after my review needs me: I asked for changes, or my approval no longer counts. An approval GitHub still
+   * counts after a push (no stale-review dismissal) does not.
+   */
+  reviewAgain: boolean;
   /** Review asked of me, directly or through one of my teams. */
   requestedOfMe: boolean;
   /** Only through a team, not to me by name. */
@@ -101,6 +106,7 @@ export function prFacts(pr: PullRequest, me: string, blockedBy: string[] = []): 
         !pr.requestedReviewers.some((l): boolean => sameLogin(l, r.author)),
     )
     .map((r): string => r.author);
+  const approved = pr.reviewDecision === "APPROVED" && !pr.isDraft;
   const requestedDirectly = pr.requestedReviewers.some((l): boolean => sameLogin(l, me));
   const requestedOfMe = requestedDirectly || pr.viewerRequested === true;
   const readyAt = pr.readyAt ?? pr.createdAt;
@@ -114,7 +120,7 @@ export function prFacts(pr: PullRequest, me: string, blockedBy: string[] = []): 
     changesPending: changes !== null && isAfter(changes.submittedAt, pr.lastCommitAt) ? changes : null,
     newComment:
       comment !== null && !sameLogin(comment.author, me) && isAfter(comment.at, pr.lastCommitAt) ? comment : null,
-    approved: pr.reviewDecision === "APPROVED" && !pr.isDraft,
+    approved,
     approval: latest(
       humanReviews.filter((r): boolean => r.state === "APPROVED"),
       (r): string => r.submittedAt,
@@ -122,6 +128,7 @@ export function prFacts(pr: PullRequest, me: string, blockedBy: string[] = []): 
     myReview,
     myApprovalHolds: myReview?.state === "APPROVED" && !pushedSinceMyReview,
     pushedSinceMyReview,
+    reviewAgain: pushedSinceMyReview && !pr.isDraft && (myReview?.state === "CHANGES_REQUESTED" || !approved),
     requestedOfMe,
     requestedViaTeam: requestedOfMe && !requestedDirectly,
     pendingReviewers: pending,

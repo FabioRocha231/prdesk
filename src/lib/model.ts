@@ -14,9 +14,9 @@ export const COLUMN_LABEL: Record<Column, string> = {
 /** What lands in each column; mirrors the rules in triage.ts. */
 export const COLUMN_HINT: Record<Column, string> = {
   myTurn:
-    "A bola está com você. Nas suas PRs: thread respondida, mudanças pedidas, CI falhando, comentário novo ou aprovada e pronta para merge. Nas dos outros: alguém respondeu uma thread que você abriu.",
+    "A bola está com você nas suas PRs: thread respondida, mudanças pedidas, CI falhando, comentário novo ou aprovada e pronta para merge.",
   reviewRequested:
-    "PRs de outras pessoas esperando você: pediram seu review, ou o autor fez commits depois do seu último review.",
+    "PRs de outras pessoas esperando você: pediram seu review, responderam uma thread sua, ou o autor fez commits depois que você pediu mudanças.",
   waiting: "Suas PRs esperando os outros: rascunho, sem review ainda ou aguardando nova rodada de review.",
   others: "PRs dos seus escopos (orgs e repos em Ajustes) em que você não tem nada pendente.",
 };
