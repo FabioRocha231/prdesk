@@ -19,8 +19,9 @@ const ME: Holder = { kind: "me" };
 
 /** My PR. Order is priority: what blocks everything (conflicts) first, then what people said, then what waits. */
 const MINE: Rule[] = [
-  // Conflicts lead, matching the PR's next step (nextStep.ts). No event marks when they appeared.
-  (f) => (f.conflicting ? { kind: "conflicts", holder: ME, actor: null, at: f.pr.updatedAt } : null),
+  // Conflicts lead, matching the PR's next step (nextStep.ts). No event marks when they appeared. A draft is still
+  // being written: its conflicts and red CI are part of that work, not a turn.
+  (f) => (f.conflicting && !f.pr.isDraft ? { kind: "conflicts", holder: ME, actor: null, at: f.pr.updatedAt } : null),
   (f) => {
     const [t] = f.threadsForMe;
     return t === undefined
@@ -31,7 +32,7 @@ const MINE: Rule[] = [
     f.changesPending === null
       ? null
       : { kind: "changes", holder: ME, actor: f.changesPending.author, at: f.changesPending.submittedAt },
-  (f) => (f.ciFailing ? { kind: "ci", holder: ME, actor: null, at: f.pr.lastCommitAt } : null),
+  (f) => (f.ciFailing && !f.pr.isDraft ? { kind: "ci", holder: ME, actor: null, at: f.pr.lastCommitAt } : null),
   (f) =>
     f.newComment === null ? null : { kind: "comment", holder: ME, actor: f.newComment.author, at: f.newComment.at },
   // Changes were requested, I pushed, and nobody asked the reviewer back: they will not look on their own.
@@ -93,10 +94,7 @@ const THEIRS: Rule[] = [
           viaTeam: f.requestedViaTeam,
         }
       : null,
-  (f) =>
-    f.pushedSinceMyReview && !f.pr.isDraft
-      ? { kind: "review-again", holder: ME, actor: f.pr.author, at: f.pr.lastCommitAt }
-      : null,
+  (f) => (f.reviewAgain ? { kind: "review-again", holder: ME, actor: f.pr.author, at: f.pr.lastCommitAt } : null),
   (f) => {
     const holder: Holder = { kind: "author", login: f.pr.author };
     const kind: TurnKind = f.approved
@@ -110,7 +108,8 @@ const THEIRS: Rule[] = [
   },
 ];
 
-const REVIEW_KINDS: ReadonlySet<TurnKind> = new Set(["review-requested", "review-again"]);
+// Everything I do on someone else's PR is review work, including answering a thread I opened there.
+const REVIEW_KINDS: ReadonlySet<TurnKind> = new Set(["review-requested", "review-again", "reply"]);
 
 function columnOf(turn: Turn, mine: boolean): Column {
   if (turn.holder.kind === "me") return REVIEW_KINDS.has(turn.kind) ? "reviewRequested" : "myTurn";

@@ -41,6 +41,13 @@ describe("triage of my PRs", () => {
     });
   });
 
+  it("leaves a draft's conflicts and red CI with the draft, not with me", () => {
+    expect(triage(pr({ isDraft: true, branch: "conflicts", ciState: "FAILURE" }), ME)).toMatchObject({
+      column: "waiting",
+      kind: "draft",
+    });
+  });
+
   it("is my turn when the branch has conflicts, ahead of failing CI", () => {
     expect(triage(pr({ branch: "conflicts", ciState: "FAILURE" }), ME)).toMatchObject({
       column: "myTurn",
@@ -161,7 +168,7 @@ describe("triage of my PRs", () => {
 describe("triage of other people's PRs", () => {
   const theirs = { author: "caio" };
 
-  it("is my turn when someone answered a thread I started", () => {
+  it("is review work when someone answered a thread I started", () => {
     const t = triage(
       pr({
         ...theirs,
@@ -177,23 +184,28 @@ describe("triage of other people's PRs", () => {
       }),
       ME,
     );
-    expect(t).toMatchObject({ column: "myTurn", actor: "caio" });
+    expect(t).toMatchObject({ column: "reviewRequested", actor: "caio" });
   });
 
-  it("is a review request when I am a requested reviewer or new commits landed after my verdict", () => {
+  it("is a review request when I am a requested reviewer or new commits answer my verdict", () => {
     expect(triage(pr({ ...theirs, requestedReviewers: [ME] }), ME).column).toBe("reviewRequested");
-    const reviewed = (state: string): PullRequest =>
+    const reviewed = (state: string, reviewDecision: PullRequest["reviewDecision"] = null): PullRequest =>
       pr({
         ...theirs,
+        reviewDecision,
         reviews: [{ author: ME, state, submittedAt: "2026-10-01T09:00:00Z" }],
         lastCommitAt: "2026-10-02T09:00:00Z",
       });
-    expect(triage(reviewed("APPROVED"), ME).column).toBe("reviewRequested");
+    expect(triage(reviewed("CHANGES_REQUESTED", "CHANGES_REQUESTED"), ME).kind).toBe("review-again");
+    // GitHub dismissed my approval on the push: it needs me again.
+    expect(triage(reviewed("APPROVED", "REVIEW_REQUIRED"), ME).kind).toBe("review-again");
+    // My approval still counts after the push: nothing for me, the author holds it.
+    expect(triage(reviewed("APPROVED", "APPROVED"), ME)).toMatchObject({ column: "others", kind: "approved" });
     // A reply in a thread is a COMMENTED review: every later push must not ask me to review again.
     expect(triage(reviewed("COMMENTED"), ME).column).toBe("others");
   });
 
-  it("is my turn when someone answers a thread I wrote in, even one I did not start", () => {
+  it("is review work when someone answers a thread I wrote in, even one I did not start", () => {
     const t = triage(
       pr({
         ...theirs,
@@ -210,7 +222,7 @@ describe("triage of other people's PRs", () => {
       }),
       ME,
     );
-    expect(t).toMatchObject({ column: "myTurn", kind: "reply" });
+    expect(t).toMatchObject({ column: "reviewRequested", kind: "reply" });
   });
 
   it("is a review request when my team was asked", () => {
