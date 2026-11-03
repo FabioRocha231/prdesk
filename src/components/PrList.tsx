@@ -19,7 +19,7 @@ import type { ReactElement } from "react";
 import { useState } from "react";
 
 import { age } from "../lib/format";
-import { type HolderGroup, holderGroups, repoColor, VERB } from "../lib/holders";
+import { type HolderGroup, holderGroups, repoColor, STALE_DAYS, VERB } from "../lib/holders";
 import { COLUMNS, type Column, type PullRequest, type TriagedPull, type TurnKind } from "../lib/model";
 import { needsReviewers, usualReviewers } from "../lib/reviewers";
 import { STALE_HOURS, workingHours } from "../lib/track";
@@ -67,10 +67,12 @@ export function TurnBadge({ kind }: { kind: TurnKind }): ReactElement {
 }
 
 const TITLE: Record<HolderGroup["kind"], (g: HolderGroup) => string> = {
-  me: () => "Com você",
+  me: () => "Sua vez",
+  review: () => "Para revisar",
   person: (g) => `Com ${g.login}`,
   nobody: () => "Com ninguém",
   team: () => "Do time, sem nada com você",
+  stale: () => `Paradas há mais de ${STALE_DAYS} dias`,
 };
 
 const MAX_FACES = 3;
@@ -180,7 +182,8 @@ export function PrList({
   onSelect: (id: string) => void;
   onAskReview?: AskReview;
 }): ReactElement {
-  const [teamOpen, setTeamOpen] = useState(false);
+  // Groups that ask nothing of me start folded.
+  const [opened, setOpened] = useState<ReadonlySet<string>>(new Set());
   const now = Date.now();
   const all = holderGroups(groups);
   const allPulls = COLUMNS.flatMap((c): PullRequest[] => groups[c].map((t): PullRequest => t.pr));
@@ -195,16 +198,24 @@ export function PrList({
   return (
     <div className={compact ? "prlist is-compact" : "prlist"}>
       {all.map((g): ReactElement => {
-        const folded = g.kind === "team" && !teamOpen && !g.items.some((i): boolean => i.pr.id === selectedId);
+        const foldable = g.kind === "team" || g.kind === "stale";
+        const folded = foldable && !opened.has(g.key) && !g.items.some((i): boolean => i.pr.id === selectedId);
         const title = TITLE[g.kind](g);
         return (
           <section key={g.key} className={`pl-group pl-${g.kind}`} aria-label={title}>
-            {g.kind === "team" ? (
+            {foldable ? (
               <button
                 type="button"
                 className="pl-head is-toggle"
                 aria-expanded={!folded}
-                onClick={(): void => setTeamOpen(folded)}
+                onClick={(): void =>
+                  setOpened((all): Set<string> => {
+                    const next = new Set(all);
+                    if (folded) next.add(g.key);
+                    else next.delete(g.key);
+                    return next;
+                  })
+                }
               >
                 <ChevronRight className="pl-chevron" size={15} strokeWidth={2.2} aria-hidden />
                 {title} <span>{g.items.length}</span>
