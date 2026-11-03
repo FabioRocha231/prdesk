@@ -6,10 +6,18 @@ const GUIDE: { title: string; items: [string, string][] }[] = [
   {
     title: "As PRs",
     items: [
-      ["Com você", "o que espera você agora, a mais antiga primeiro: responder, revisar, resolver conflitos, mergear."],
+      [
+        "Sua vez",
+        "suas PRs esperando você, a mais antiga primeiro: responder, resolver conflitos, consertar o CI, mergear.",
+      ],
+      [
+        "Para revisar",
+        "PRs dos outros esperando você: review pedido, resposta numa thread sua ou commits depois que você pediu mudanças. As já aprovadas por outra pessoa ficam no fim.",
+      ],
       ["Com uma pessoa", "suas PRs que estão com alguém, como um revisor que ainda não olhou. Uma seção por pessoa."],
       ["Com ninguém", "rascunhos, PRs sem revisor e as que esperam outra PR. Daqui dá para pedir review."],
       ["Do time", "PRs de outras pessoas sem nada com você agora. Ficam fechadas no fim da lista."],
+      ["Paradas", "PRs sem nenhuma atividade há mais de 21 dias, de qualquer grupo. Ficam fechadas no fim."],
       ["Repositórios", "na barra lateral, cada repo com sua cor, a mesma da bolinha nas linhas. Clique para filtrar."],
       ["Novidades", "o que aconteceu nas suas PRs, igual às notificações do GitHub."],
       ["Árvore", "escolha a pasta de um repositório: todas as branches, quais têm PR e as PRs mergeadas."],
@@ -17,7 +25,10 @@ const GUIDE: { title: string; items: [string, string][] }[] = [
         "Depende de",
         "escreva “Depende de org/repo#123” na descrição: a PR espera a outra ser mergeada e você é avisado quando ela sai.",
       ],
-      ["Conflitos / Desatualizada", "a branch precisa de ajuste. Conflito na sua PR vai para Com você e gera aviso."],
+      [
+        "Conflitos / Desatualizada",
+        "a branch precisa de ajuste. Conflito na sua PR vai para Sua vez e gera aviso, menos em rascunho.",
+      ],
       [
         "Tempo em âmbar",
         "a PR está parada há mais de um dia útil. Dentro dela, o próximo passo é cutucar quem foi pedido.",
